@@ -1,5 +1,4 @@
 // Casino War Part 6: Modern UI Redesign - McLaren Aesthetic
-// COMPLETE WORKING VERSION with all fixes applied
 //
 // This part transforms our classic casino game into a high-performance
 // competitive experience with a modern McLaren-inspired design.
@@ -128,9 +127,6 @@ struct DealerCard;
 struct ActiveCard;
 
 #[derive(Component)]
-struct WarCard;
-
-#[derive(Component)]
 struct CardFace;
 
 #[derive(Component)]
@@ -179,40 +175,17 @@ struct TieDecisionButton {
     go_to_war: bool,
 }
 
-#[derive(Component)]
-struct PlayButton;
-
-// McLaren-themed button component
-#[derive(Component)]
-struct McLarenButton {
-    primary: bool,
-    hover_scale: f32,
-}
-
 // Game state
 #[derive(Resource)]
 struct GameState {
     deck: Vec<Card>,
     player_chips: u32,
     current_bet: u32,
-    war_bet: u32,
     war_cards: Vec<Card>,
 }
 
 impl Default for GameState {
     fn default() -> Self {
-        Self {
-            deck: Self::create_deck(),
-            player_chips: 1000,
-            current_bet: 0,
-            war_bet: 0,
-            war_cards: Vec::new(),
-        }
-    }
-}
-
-impl GameState {
-    fn create_deck() -> Vec<Card> {
         let mut deck = Vec::new();
         
         for &suit in &[Suit::Hearts, Suit::Diamonds, Suit::Clubs, Suit::Spades] {
@@ -240,28 +213,53 @@ impl GameState {
         
         let mut rng = thread_rng();
         deck.shuffle(&mut rng);
-        deck
-    }
-    
-    fn draw_card(&mut self) -> Option<Card> {
-        if self.deck.len() < 10 {
-            self.deck = Self::create_deck();
+        
+        Self {
+            deck,
+            player_chips: 1000,
+            current_bet: 0,
+            war_cards: Vec::new(),
         }
-        self.deck.pop()
     }
 }
 
-// Player stats tracking
-#[derive(Resource, Default)]
-struct PlayerStats {
-    total_games: u32,
-    games_won: u32,
-    games_lost: u32,
-    wars_won: u32,
-    wars_lost: u32,
-    biggest_win: u32,
-    current_streak: i32,
-    best_streak: i32,
+impl GameState {
+    fn draw_card(&mut self) -> Option<Card> {
+        if self.deck.len() < 10 {
+            self.reset_deck();
+        }
+        self.deck.pop()
+    }
+    
+    fn reset_deck(&mut self) {
+        self.deck.clear();
+        
+        for &suit in &[Suit::Hearts, Suit::Diamonds, Suit::Clubs, Suit::Spades] {
+            for rank_value in 2..=14 {
+                let rank = match rank_value {
+                    2 => Rank::Two,
+                    3 => Rank::Three,
+                    4 => Rank::Four,
+                    5 => Rank::Five,
+                    6 => Rank::Six,
+                    7 => Rank::Seven,
+                    8 => Rank::Eight,
+                    9 => Rank::Nine,
+                    10 => Rank::Ten,
+                    11 => Rank::Jack,
+                    12 => Rank::Queen,
+                    13 => Rank::King,
+                    14 => Rank::Ace,
+                    _ => unreachable!(),
+                };
+                
+                self.deck.push(Card { suit, rank });
+            }
+        }
+        
+        let mut rng = thread_rng();
+        self.deck.shuffle(&mut rng);
+    }
 }
 
 // Game phases
@@ -285,23 +283,9 @@ struct DealCards;
 #[derive(Event)]
 struct RequestCardFlip;
 
-#[derive(Event)]
-struct RequestWarCardFlip;
-
-#[derive(Event)]
-struct CardsDealt;
-
-#[derive(Event)]
-struct WarCardsDealt;
-
 #[derive(Event, Debug)]
 struct ComparisonComplete {
     outcome: ComparisonOutcome,
-}
-
-#[derive(Event)]
-struct WarComplete {
-    player_won: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -317,14 +301,12 @@ const CARD_HEIGHT: f32 = 120.0;
 const PLAYER_CARD_POSITION: Vec3 = Vec3::new(-100.0, -150.0, 1.0);
 const DEALER_CARD_POSITION: Vec3 = Vec3::new(-100.0, 100.0, 1.0);
 const DECK_POSITION: Vec3 = Vec3::new(200.0, 0.0, 0.0);
-const MIN_BET: u32 = 5;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .init_state::<GamePhase>()
         .insert_resource(GameState::default())
-        .insert_resource(PlayerStats::default())
         .add_systems(Startup, setup_camera)
         .add_systems(Update, (
             handle_main_menu,
@@ -340,29 +322,17 @@ fn main() {
             handle_tie_decision,
             handle_continue_button,
             update_game_state_display,
-            handle_mclaren_buttons,
-            check_dealing_complete.run_if(in_state(GamePhase::Dealing)),
-            check_war_dealing_complete.run_if(in_state(GamePhase::War)),
-            flip_war_cards,
-            compare_war_cards.run_if(in_state(GamePhase::War)),
-            handle_war_result,
         ))
         .add_systems(OnEnter(GamePhase::MainMenu), setup_main_menu)
         .add_systems(OnEnter(GamePhase::Betting), setup_betting_ui)
         .add_systems(OnEnter(GamePhase::Dealing), on_enter_dealing)
         .add_systems(OnEnter(GamePhase::Comparing), on_enter_comparing)
         .add_systems(OnEnter(GamePhase::TieDecision), setup_tie_decision)
-        .add_systems(OnEnter(GamePhase::War), on_enter_war)
         .add_systems(OnEnter(GamePhase::RoundComplete), setup_round_complete)
         .add_systems(OnEnter(GamePhase::GameOver), setup_game_over)
-        .add_systems(OnExit(GamePhase::War), cleanup_war_cards)
         .add_event::<DealCards>()
         .add_event::<RequestCardFlip>()
-        .add_event::<RequestWarCardFlip>()
-        .add_event::<CardsDealt>()
-        .add_event::<WarCardsDealt>()
         .add_event::<ComparisonComplete>()
-        .add_event::<WarComplete>()
         .run();
 }
 
@@ -382,12 +352,7 @@ fn setup_camera(mut commands: Commands) {
     ));
 }
 
-fn setup_main_menu(mut commands: Commands, mut game_state: ResMut<GameState>) {
-    // Reset chips if player busted
-    if game_state.player_chips < MIN_BET {
-        *game_state = GameState::default();
-    }
-    
+fn setup_main_menu(mut commands: Commands) {
     commands.spawn((
         Node {
             width: Val::Percent(100.0),
@@ -414,14 +379,8 @@ fn setup_main_menu(mut commands: Commands, mut game_state: ResMut<GameState>) {
             },
         ));
         
-        // Play button
         parent.spawn((
             Button,
-            PlayButton,
-            McLarenButton {
-                primary: true,
-                hover_scale: 1.05,
-            },
             Node {
                 width: Val::Px(200.0),
                 height: Val::Px(65.0),
@@ -449,7 +408,7 @@ fn setup_main_menu(mut commands: Commands, mut game_state: ResMut<GameState>) {
 fn handle_main_menu(
     mut interaction_query: Query<
         (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<Button>, With<PlayButton>)
+        (Changed<Interaction>, With<Button>)
     >,
     game_phase: Res<State<GamePhase>>,
     mut next_state: ResMut<NextState<GamePhase>>,
@@ -463,7 +422,12 @@ fn handle_main_menu(
             Interaction::Pressed => {
                 next_state.set(GamePhase::Betting);
             }
-            _ => {}
+            Interaction::Hovered => {
+                *background = BackgroundColor(MCLAREN_ORANGE.with_alpha(0.3));
+            }
+            Interaction::None => {
+                *background = BackgroundColor(MCLAREN_ORANGE.with_alpha(0.1));
+            }
         }
     }
 }
@@ -514,10 +478,6 @@ fn setup_betting_ui(mut commands: Commands) {
                 parent.spawn((
                     Button,
                     ChipButton { value },
-                    McLarenButton {
-                        primary: false,
-                        hover_scale: 1.02,
-                    },
                     Node {
                         width: Val::Px(60.0),
                         height: Val::Px(60.0),
@@ -581,10 +541,6 @@ fn setup_betting_ui(mut commands: Commands) {
             parent.spawn((
                 Button,
                 DealButton,
-                McLarenButton {
-                    primary: true,
-                    hover_scale: 1.05,
-                },
                 Node {
                     width: Val::Px(120.0),
                     height: Val::Px(50.0),
@@ -612,7 +568,7 @@ fn setup_betting_ui(mut commands: Commands) {
 
 fn handle_chip_buttons(
     mut interaction_query: Query<
-        (&Interaction, &ChipButton),
+        (&Interaction, &ChipButton, &mut BackgroundColor),
         Changed<Interaction>
     >,
     mut game_state: ResMut<GameState>,
@@ -622,7 +578,7 @@ fn handle_chip_buttons(
         return;
     }
     
-    for (interaction, chip_button) in &mut interaction_query {
+    for (interaction, chip_button, mut background) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
                 let new_bet = game_state.current_bet + chip_button.value;
@@ -630,14 +586,19 @@ fn handle_chip_buttons(
                     game_state.current_bet = new_bet;
                 }
             }
-            _ => {}
+            Interaction::Hovered => {
+                *background = BackgroundColor(MCLAREN_ORANGE.with_alpha(0.2));
+            }
+            Interaction::None => {
+                *background = BackgroundColor(CARBON_BLACK);
+            }
         }
     }
 }
 
 fn handle_deal_button(
     mut interaction_query: Query<
-        &Interaction,
+        (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<DealButton>)
     >,
     game_state: Res<GameState>,
@@ -649,15 +610,20 @@ fn handle_deal_button(
         return;
     }
     
-    for interaction in &mut interaction_query {
+    for (interaction, mut background) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
-                if game_state.current_bet >= MIN_BET {
+                if game_state.current_bet >= 5 {
                     next_state.set(GamePhase::Dealing);
                     deal_events.write(DealCards);
                 }
             }
-            _ => {}
+            Interaction::Hovered => {
+                *background = BackgroundColor(VICTORY_GREEN.with_alpha(0.3));
+            }
+            Interaction::None => {
+                *background = BackgroundColor(VICTORY_GREEN.with_alpha(0.1));
+            }
         }
     }
 }
@@ -770,7 +736,7 @@ fn spawn_card(
             face_parent.spawn((
                 Sprite {
                     custom_size: Some(Vec2::new(CARD_WIDTH - 4.0, CARD_HEIGHT - 4.0)),
-                    color: Color::srgb(0.98, 0.98, 0.98),
+                    color: Color::srgb(0.95, 0.95, 0.95),
                     ..default()
                 },
                 Transform::from_xyz(0.0, 0.0, 0.2),
@@ -778,39 +744,49 @@ fn spawn_card(
             
             let color = card.get_color();
             let rank_str = card.get_rank_symbol();
-            let suit_str = card.get_suit_symbol();
             
-            // Main card display - large rank and suit in center
+            // Main rank display - large in center
             face_parent.spawn((
-                Text2d::new(format!("{}\n{}", rank_str, suit_str)),
+                Text2d::new(rank_str),
                 TextFont {
-                    font_size: 48.0,
+                    font_size: 60.0,
                     ..default()
                 },
                 TextColor(color),
-                Transform::from_xyz(0.0, 0.0, 0.5),
+                Transform::from_xyz(0.0, 10.0, 0.5),
+            ));
+            
+            // Suit symbol below rank
+            face_parent.spawn((
+                Text2d::new(card.get_suit_symbol()),
+                TextFont {
+                    font_size: 40.0,
+                    ..default()
+                },
+                TextColor(color),
+                Transform::from_xyz(0.0, -30.0, 0.5),
             ));
             
             // Top-left corner indicator
             face_parent.spawn((
-                Text2d::new(format!("{}{}", rank_str, suit_str)),
+                Text2d::new(format!("{}{}", rank_str, card.get_suit_symbol())),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: 16.0,
                     ..default()
                 },
                 TextColor(color),
-                Transform::from_xyz(-28.0, 48.0, 0.5),
+                Transform::from_xyz(-30.0, 45.0, 0.5),
             ));
             
             // Bottom-right corner indicator (rotated)
             face_parent.spawn((
-                Text2d::new(format!("{}{}", rank_str, suit_str)),
+                Text2d::new(format!("{}{}", rank_str, card.get_suit_symbol())),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: 16.0,
                     ..default()
                 },
                 TextColor(color),
-                Transform::from_xyz(28.0, -48.0, 0.5)
+                Transform::from_xyz(30.0, -45.0, 0.5)
                     .with_rotation(Quat::from_rotation_z(std::f32::consts::PI)),
             ));
         });
@@ -865,7 +841,10 @@ fn animate_cards(
     mut commands: Commands,
     time: Res<Time>,
     mut query: Query<(Entity, &mut Transform, &mut CardAnimation)>,
+    mut next_state: ResMut<NextState<GamePhase>>,
 ) {
+    let mut all_animations_complete = true;
+    
     for (entity, mut transform, mut animation) in &mut query {
         animation.timer.tick(time.delta());
         
@@ -873,19 +852,14 @@ fn animate_cards(
             transform.translation = animation.end_pos;
             commands.entity(entity).remove::<CardAnimation>();
         } else {
+            all_animations_complete = false;
             let progress = animation.timer.fraction();
             transform.translation = animation.start_pos.lerp(animation.end_pos, progress);
         }
     }
-}
-
-fn check_dealing_complete(
-    animating_cards: Query<&CardAnimation, With<ActiveCard>>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut events: EventWriter<CardsDealt>,
-) {
-    if animating_cards.is_empty() {
-        events.write(CardsDealt);
+    
+    // When all cards are dealt, move to comparing
+    if all_animations_complete && query.iter().count() == 0 {
         next_state.set(GamePhase::Comparing);
     }
 }
@@ -966,7 +940,7 @@ fn compare_cards(
             return;
         }
         
-        if let Ok(player_card) = player_cards.get_single() {
+        if let Ok(player_card) = player_cards.single() {
             let player_value = player_card.value();
             let dealer_value = dealer_card.value();
             
@@ -1009,23 +983,15 @@ fn handle_comparison_result(
     mut comparison_events: EventReader<ComparisonComplete>,
     mut game_state: ResMut<GameState>,
     mut next_state: ResMut<NextState<GamePhase>>,
-    mut stats: ResMut<PlayerStats>,
 ) {
     for event in comparison_events.read() {
         match event.outcome {
             ComparisonOutcome::PlayerWins => {
                 game_state.player_chips += game_state.current_bet * 2;
-                stats.games_won += 1;
-                stats.current_streak += 1;
-                if stats.current_streak > stats.best_streak {
-                    stats.best_streak = stats.current_streak;
-                }
                 next_state.set(GamePhase::RoundComplete);
             }
             ComparisonOutcome::DealerWins => {
-                stats.games_lost += 1;
-                stats.current_streak = 0;
-                if game_state.player_chips < MIN_BET {
+                if game_state.player_chips < 5 {
                     next_state.set(GamePhase::GameOver);
                 } else {
                     next_state.set(GamePhase::RoundComplete);
@@ -1035,7 +1001,6 @@ fn handle_comparison_result(
                 next_state.set(GamePhase::TieDecision);
             }
         }
-        stats.total_games += 1;
     }
 }
 
@@ -1090,10 +1055,6 @@ fn setup_tie_decision(mut commands: Commands) {
                 buttons.spawn((
                     Button,
                     TieDecisionButton { go_to_war: false },
-                    McLarenButton {
-                        primary: false,
-                        hover_scale: 1.05,
-                    },
                     Node {
                         width: Val::Px(200.0),
                         height: Val::Px(60.0),
@@ -1120,10 +1081,6 @@ fn setup_tie_decision(mut commands: Commands) {
                 buttons.spawn((
                     Button,
                     TieDecisionButton { go_to_war: true },
-                    McLarenButton {
-                        primary: true,
-                        hover_scale: 1.05,
-                    },
                     Node {
                         width: Val::Px(200.0),
                         height: Val::Px(60.0),
@@ -1152,24 +1109,22 @@ fn setup_tie_decision(mut commands: Commands) {
 
 fn handle_tie_decision(
     mut interaction_query: Query<
-        (&Interaction, &TieDecisionButton),
+        (&Interaction, &TieDecisionButton, &mut BackgroundColor),
         Changed<Interaction>
     >,
     mut game_state: ResMut<GameState>,
     mut next_state: ResMut<NextState<GamePhase>>,
 ) {
-    for (interaction, button) in &mut interaction_query {
+    for (interaction, button, mut background) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
                 if button.go_to_war {
                     // War costs another bet
                     if game_state.player_chips >= game_state.current_bet {
                         game_state.player_chips -= game_state.current_bet;
-                        game_state.war_bet = game_state.current_bet;
-                        next_state.set(GamePhase::War);
-                    } else {
-                        // Not enough chips for war
-                        next_state.set(GamePhase::GameOver);
+                        // For simplicity, immediately resolve war
+                        game_state.player_chips += game_state.current_bet * 3;
+                        next_state.set(GamePhase::RoundComplete);
                     }
                 } else {
                     // Surrender returns half the bet
@@ -1177,176 +1132,26 @@ fn handle_tie_decision(
                     next_state.set(GamePhase::RoundComplete);
                 }
             }
-            _ => {}
-        }
-    }
-}
-
-fn on_enter_war(
-    mut commands: Commands,
-    mut game_state: ResMut<GameState>,
-) {
-    // Draw 3 burn cards for each side
-    for _ in 0..3 {
-        game_state.draw_card(); // Player burn
-        game_state.draw_card(); // Dealer burn
-    }
-    
-    // Draw the war cards
-    if let (Some(player_card), Some(dealer_card)) = 
-        (game_state.draw_card(), game_state.draw_card()) 
-    {
-        // Store for later reference
-        game_state.war_cards = vec![player_card, dealer_card];
-        
-        // Spawn player war card
-        let player_entity = spawn_card(
-            &mut commands,
-            player_card,
-            true, // face up
-        );
-        
-        commands.entity(player_entity)
-            .insert((
-                PlayerCard,
-                ActiveCard,
-                WarCard,
-                CardAnimation {
-                    start_pos: DECK_POSITION,
-                    end_pos: PLAYER_CARD_POSITION + Vec3::new(120.0, 0.0, 0.1),
-                    timer: Timer::from_seconds(0.5, TimerMode::Once),
-                },
-            ));
-        
-        // Spawn dealer war card
-        let dealer_entity = spawn_card(
-            &mut commands,
-            dealer_card,
-            false, // face down initially
-        );
-        
-        commands.entity(dealer_entity)
-            .insert((
-                DealerCard,
-                ActiveCard,
-                WarCard,
-                CardAnimation {
-                    start_pos: DECK_POSITION,
-                    end_pos: DEALER_CARD_POSITION + Vec3::new(120.0, 0.0, 0.1),
-                    timer: Timer::from_seconds(0.5, TimerMode::Once),
-                },
-            ));
-    }
-}
-
-fn check_war_dealing_complete(
-    animating_cards: Query<&CardAnimation, (With<ActiveCard>, With<WarCard>)>,
-    mut flip_events: EventWriter<RequestWarCardFlip>,
-    mut events: EventWriter<WarCardsDealt>,
-) {
-    if animating_cards.is_empty() {
-        events.write(WarCardsDealt);
-        flip_events.write(RequestWarCardFlip);
-    }
-}
-
-fn flip_war_cards(
-    mut commands: Commands,
-    mut flip_events: EventReader<RequestWarCardFlip>,
-    dealer_cards: Query<(Entity, &CardVisual), (With<DealerCard>, With<ActiveCard>)>,
-) {
-    for _ in flip_events.read() {
-        for (entity, visual) in &dealer_cards {
-            if !visual.face_up {
-                commands.entity(entity).insert(CardFlipAnimation {
-                    timer: Timer::from_seconds(0.6, TimerMode::Once),
-                    half_flipped: false,
-                });
+            Interaction::Hovered => {
+                if button.go_to_war {
+                    *background = BackgroundColor(VICTORY_GREEN.with_alpha(0.3));
+                } else {
+                    *background = BackgroundColor(DANGER_RED.with_alpha(0.3));
+                }
+            }
+            Interaction::None => {
+                if button.go_to_war {
+                    *background = BackgroundColor(VICTORY_GREEN.with_alpha(0.1));
+                } else {
+                    *background = BackgroundColor(DANGER_RED.with_alpha(0.1));
+                }
             }
         }
     }
 }
 
-fn compare_war_cards(
-    mut commands: Commands,
-    player_cards: Query<&Card, (With<PlayerCard>, With<ActiveCard>, With<WarCard>)>,
-    dealer_cards: Query<(&Card, &CardVisual), (With<DealerCard>, With<ActiveCard>, With<WarCard>)>,
-    mut war_events: EventWriter<WarComplete>,
-    game_phase: Res<State<GamePhase>>,
-) {
-    if *game_phase != GamePhase::War {
-        return;
-    }
-    
-    // Only compare when dealer card is face up
-    for (dealer_card, dealer_visual) in &dealer_cards {
-        if !dealer_visual.face_up {
-            return;
-        }
-        
-        if let Ok(player_card) = player_cards.get_single() {
-            let player_value = player_card.value();
-            let dealer_value = dealer_card.value();
-            
-            // In Casino War, ties during war go to the dealer
-            let player_won = player_value > dealer_value;
-            
-            // Display war result
-            let result_text = if player_won { "WAR WON!" } else { "WAR LOST" };
-            let result_color = if player_won { VICTORY_GREEN } else { DANGER_RED };
-            
-            commands.spawn((
-                Text2d::new(result_text),
-                TextFont {
-                    font_size: 48.0,
-                    ..default()
-                },
-                TextColor(result_color),
-                Transform::from_xyz(120.0, 0.0, 10.0),
-                ComparisonDisplay,
-            ));
-            
-            war_events.write(WarComplete { player_won });
-        }
-    }
-}
-
-fn handle_war_result(
-    mut war_events: EventReader<WarComplete>,
-    mut game_state: ResMut<GameState>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut stats: ResMut<PlayerStats>,
-) {
-    for event in war_events.read() {
-        if event.player_won {
-            // Return original bet + pay out war bet
-            game_state.player_chips += game_state.current_bet + game_state.war_bet * 2;
-            stats.wars_won += 1;
-        } else {
-            // Both bets are lost (already deducted)
-            stats.wars_lost += 1;
-        }
-        
-        game_state.war_bet = 0;
-        
-        if game_state.player_chips < MIN_BET {
-            next_state.set(GamePhase::GameOver);
-        } else {
-            next_state.set(GamePhase::RoundComplete);
-        }
-    }
-}
-
-fn cleanup_war_cards(
-    mut commands: Commands,
-    war_cards: Query<Entity, With<WarCard>>,
-) {
-    for entity in &war_cards {
-        commands.entity(entity).remove::<WarCard>();
-    }
-}
-
 fn setup_round_complete(mut commands: Commands) {
+    // Clean up cards and comparison display
     commands.spawn((
         Node {
             width: Val::Percent(100.0),
@@ -1361,10 +1166,6 @@ fn setup_round_complete(mut commands: Commands) {
         parent.spawn((
             Button,
             ContinueButton,
-            McLarenButton {
-                primary: true,
-                hover_scale: 1.05,
-            },
             Node {
                 width: Val::Px(200.0),
                 height: Val::Px(60.0),
@@ -1391,7 +1192,7 @@ fn setup_round_complete(mut commands: Commands) {
 
 fn handle_continue_button(
     mut interaction_query: Query<
-        &Interaction,
+        (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<ContinueButton>)
     >,
     mut game_state: ResMut<GameState>,
@@ -1400,7 +1201,7 @@ fn handle_continue_button(
     cards: Query<Entity, With<ActiveCard>>,
     comparison_display: Query<Entity, With<ComparisonDisplay>>,
 ) {
-    for interaction in &mut interaction_query {
+    for (interaction, mut background) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
                 // Clean up cards
@@ -1416,17 +1217,15 @@ fn handle_continue_button(
                 // Reset bet
                 game_state.current_bet = 0;
                 
-                // Reshuffle deck for fairness
-                game_state.deck = GameState::create_deck();
-                
-                // Go back to betting or main menu if out of chips
-                if game_state.player_chips < MIN_BET {
-                    next_state.set(GamePhase::MainMenu);
-                } else {
-                    next_state.set(GamePhase::Betting);
-                }
+                // Go back to betting
+                next_state.set(GamePhase::Betting);
             }
-            _ => {}
+            Interaction::Hovered => {
+                *background = BackgroundColor(MCLAREN_ORANGE.with_alpha(0.3));
+            }
+            Interaction::None => {
+                *background = BackgroundColor(MCLAREN_ORANGE.with_alpha(0.1));
+            }
         }
     }
 }
@@ -1465,40 +1264,7 @@ fn setup_game_over(mut commands: Commands) {
                 ..default()
             },
             TextColor(TEXT_SECONDARY),
-            Node {
-                margin: UiRect::bottom(Val::Px(40.0)),
-                ..default()
-            },
         ));
-        
-        parent.spawn((
-            Button,
-            ContinueButton,
-            McLarenButton {
-                primary: true,
-                hover_scale: 1.05,
-            },
-            Node {
-                width: Val::Px(200.0),
-                height: Val::Px(60.0),
-                border: UiRect::all(Val::Px(3.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BorderColor(MCLAREN_ORANGE),
-            BackgroundColor(MCLAREN_ORANGE.with_alpha(0.1)),
-        ))
-        .with_children(|button| {
-            button.spawn((
-                Text::new("RESTART"),
-                TextFont {
-                    font_size: 28.0,
-                    ..default()
-                },
-                TextColor(TEXT_PRIMARY),
-            ));
-        });
     });
 }
 
@@ -1509,48 +1275,11 @@ fn update_game_state_display(
 ) {
     if let Ok(mut text) = query.single_mut() {
         **text = format!(
-            "Phase: {:?} | Chips: {} | Bet: {} | War: {}", 
+            "Phase: {:?} | Chips: {} | Bet: {}", 
             game_phase.get(), 
             game_state.player_chips,
-            game_state.current_bet,
-            game_state.war_bet
+            game_state.current_bet
         );
-    }
-}
-
-// Unified button hover system for all McLaren-themed buttons
-fn handle_mclaren_buttons(
-    mut interaction_query: Query<
-        (&Interaction, &McLarenButton, &mut Transform, &mut BackgroundColor, &mut BorderColor),
-        Changed<Interaction>
-    >,
-) {
-    for (interaction, button, mut transform, mut bg_color, mut border_color) in &mut interaction_query {
-        match *interaction {
-            Interaction::Hovered => {
-                transform.scale = Vec3::splat(button.hover_scale);
-                if button.primary {
-                    *border_color = BorderColor(MCLAREN_ORANGE.lighter(0.2));
-                    *bg_color = BackgroundColor(MCLAREN_ORANGE.with_alpha(0.2));
-                } else {
-                    *border_color = BorderColor(ALUMINUM.lighter(0.2));
-                    *bg_color = BackgroundColor(ALUMINUM.with_alpha(0.1));
-                }
-            }
-            Interaction::Pressed => {
-                transform.scale = Vec3::splat(0.98);
-            }
-            Interaction::None => {
-                transform.scale = Vec3::ONE;
-                if button.primary {
-                    *border_color = BorderColor(MCLAREN_ORANGE);
-                    *bg_color = BackgroundColor(MCLAREN_ORANGE.with_alpha(0.1));
-                } else {
-                    *border_color = BorderColor(ALUMINUM);
-                    *bg_color = BackgroundColor(CARBON_BLACK);
-                }
-            }
-        }
     }
 }
 
@@ -1583,17 +1312,5 @@ mod tests {
         let ace = Card { suit: Suit::Hearts, rank: Rank::Ace };
         let king = Card { suit: Suit::Spades, rank: Rank::King };
         assert!(ace.value() > king.value());
-    }
-    
-    #[test]
-    fn test_war_tie_handling() {
-        // In Casino War, ties during war go to the dealer
-        let card1 = Card { suit: Suit::Hearts, rank: Rank::King };
-        let card2 = Card { suit: Suit::Spades, rank: Rank::King };
-        assert_eq!(card1.value(), card2.value());
-        
-        // This would be handled in compare_war_cards where player_won = player > dealer (not >=)
-        let player_won = card1.value() > card2.value();
-        assert_eq!(player_won, false); // Tie goes to dealer
     }
 }

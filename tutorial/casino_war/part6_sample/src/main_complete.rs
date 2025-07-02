@@ -343,7 +343,6 @@ fn main() {
             handle_mclaren_buttons,
             check_dealing_complete.run_if(in_state(GamePhase::Dealing)),
             check_war_dealing_complete.run_if(in_state(GamePhase::War)),
-            flip_war_cards,
             compare_war_cards.run_if(in_state(GamePhase::War)),
             handle_war_result,
         ))
@@ -1253,7 +1252,7 @@ fn check_war_dealing_complete(
 fn flip_war_cards(
     mut commands: Commands,
     mut flip_events: EventReader<RequestWarCardFlip>,
-    dealer_cards: Query<(Entity, &CardVisual), (With<DealerCard>, With<ActiveCard>)>,
+    dealer_cards: Query<(Entity, &CardVisual), (With<DealerCard>, With<ActiveCard>, With<WarCard>)>,
 ) {
     for _ in flip_events.read() {
         for (entity, visual) in &dealer_cards {
