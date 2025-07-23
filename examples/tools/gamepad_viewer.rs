@@ -1,4 +1,9 @@
 //! Shows a visualization of gamepad buttons, sticks, and triggers
+//!
+//! This example is like an X-ray machine for your gamepad - it shows every button,
+//! stick, and trigger in real-time! Perfect for debugging input issues or understanding
+//! how gamepad data flows through Bevy. Each element lights up when activated and
+//! shows exact analog values for sticks and triggers.
 
 use std::f32::consts::PI;
 
@@ -8,46 +13,61 @@ use bevy::{
     sprite::Anchor,
 };
 
+// VISUAL CONSTANTS - Layout and sizing
 const BUTTON_RADIUS: f32 = 25.;
 const BUTTON_CLUSTER_RADIUS: f32 = 50.;
 const START_SIZE: Vec2 = Vec2::new(30., 15.);
 const TRIGGER_SIZE: Vec2 = Vec2::new(70., 20.);
 const STICK_BOUNDS_SIZE: f32 = 100.;
 
+// Position offsets for button groups
 const BUTTONS_X: f32 = 150.;
 const BUTTONS_Y: f32 = 80.;
 const STICKS_X: f32 = 150.;
 const STICKS_Y: f32 = -135.;
 
-const NORMAL_BUTTON_COLOR: Color = Color::srgb(0.3, 0.3, 0.3);
-const ACTIVE_BUTTON_COLOR: Color = Color::srgb(0.5, 0., 0.5);
-const LIVE_COLOR: Color = Color::srgb(0.4, 0.4, 0.4);
-const DEAD_COLOR: Color = Color::srgb(0.13, 0.13, 0.13);
+// Color scheme
+const NORMAL_BUTTON_COLOR: Color = Color::srgb(0.3, 0.3, 0.3);   // Gray when inactive
+const ACTIVE_BUTTON_COLOR: Color = Color::srgb(0.5, 0., 0.5);    // Purple when pressed
+const LIVE_COLOR: Color = Color::srgb(0.4, 0.4, 0.4);            // Stick live zone
+const DEAD_COLOR: Color = Color::srgb(0.13, 0.13, 0.13);         // Stick dead zone
 
+// COMPONENTS - Define behavior for visual elements
+
+// Button visual that reacts to a specific gamepad button
 #[derive(Component, Deref)]
 struct ReactTo(GamepadButton);
+
+// Visual element that moves based on analog stick axes
 #[derive(Component)]
 struct MoveWithAxes {
     x_axis: GamepadAxis,
     y_axis: GamepadAxis,
-    scale: f32,
+    scale: f32,  // Multiplier for axis values
 }
+
+// Text that displays axis values
 #[derive(Component)]
 struct TextWithAxes {
     x_axis: GamepadAxis,
     y_axis: GamepadAxis,
 }
+
+// Text that shows analog button pressure (triggers)
 #[derive(Component, Deref)]
 struct TextWithButtonValue(GamepadButton);
 
 #[derive(Component)]
 struct ConnectedGamepadsText;
 
+// RESOURCES - Shared materials for button states
 #[derive(Resource)]
 struct ButtonMaterials {
     normal: MeshMaterial2d<ColorMaterial>,
     active: MeshMaterial2d<ColorMaterial>,
 }
+
+// FromWorld lets us create resources that need World access
 impl FromWorld for ButtonMaterials {
     fn from_world(world: &mut World) -> Self {
         Self {
@@ -76,6 +96,7 @@ impl FromWorld for ButtonMeshes {
     }
 }
 
+// BUNDLE - Convenient grouping of components for button visuals
 #[derive(Bundle)]
 struct GamepadButtonBundle {
     mesh: Mesh2d,
@@ -100,6 +121,7 @@ impl GamepadButtonBundle {
         }
     }
 
+    // Builder pattern for rotating D-pad buttons
     pub fn with_rotation(mut self, angle: f32) -> Self {
         self.transform.rotation = Quat::from_rotation_z(angle);
         self
@@ -109,19 +131,24 @@ impl GamepadButtonBundle {
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .init_resource::<ButtonMaterials>()
-        .init_resource::<ButtonMeshes>()
+        .init_resource::<ButtonMaterials>()  // Button colors
+        .init_resource::<ButtonMeshes>()     // Button shapes
         .add_systems(
             Startup,
-            (setup, setup_sticks, setup_triggers, setup_connected),
+            (
+                setup,               // Face buttons and D-pad
+                setup_sticks,        // Analog sticks
+                setup_triggers,      // Shoulder triggers
+                setup_connected,     // Connection status text
+            ),
         )
         .add_systems(
             Update,
             (
-                update_buttons,
-                update_button_values,
-                update_axes,
-                update_connected,
+                update_buttons,      // Digital button presses
+                update_button_values,// Analog button values
+                update_axes,         // Stick positions
+                update_connected,    // Gamepad connections
             ),
         )
         .run();
@@ -130,12 +157,13 @@ fn main() {
 fn setup(mut commands: Commands, meshes: Res<ButtonMeshes>, materials: Res<ButtonMaterials>) {
     commands.spawn(Camera2d);
 
-    // Buttons
-
+    // FACE BUTTONS (Right side - ABXY on Xbox, Triangle/Circle/X/Square on PlayStation)
+    // Using cardinal directions avoids platform-specific naming
     commands.spawn((
         Transform::from_xyz(BUTTONS_X, BUTTONS_Y, 0.),
         Visibility::default(),
         children![
+            // North = Y (Xbox) / Triangle (PlayStation)
             GamepadButtonBundle::new(
                 GamepadButton::North,
                 meshes.circle.clone(),
@@ -371,6 +399,7 @@ fn setup_connected(mut commands: Commands) {
     ));
 }
 
+// Update visual state of digital buttons
 fn update_buttons(
     gamepads: Query<&Gamepad>,
     materials: Res<ButtonMaterials>,
@@ -378,9 +407,11 @@ fn update_buttons(
 ) {
     for gamepad in &gamepads {
         for (mut handle, react_to) in query.iter_mut() {
+            // Change color on press
             if gamepad.just_pressed(**react_to) {
                 *handle = materials.active.clone();
             }
+            // Revert color on release
             if gamepad.just_released(**react_to) {
                 *handle = materials.normal.clone();
             }
@@ -400,6 +431,7 @@ fn update_button_values(
     }
 }
 
+// Update analog stick positions and display values
 fn update_axes(
     mut axis_events: EventReader<GamepadAxisChangedEvent>,
     mut query: Query<(&mut Transform, &MoveWithAxes)>,
@@ -408,7 +440,9 @@ fn update_axes(
 ) {
     for axis_event in axis_events.read() {
         let axis_type = axis_event.axis;
-        let value = axis_event.value;
+        let value = axis_event.value;  // -1.0 to 1.0
+        
+        // Move stick indicators
         for (mut transform, move_with) in query.iter_mut() {
             if axis_type == move_with.x_axis {
                 transform.translation.x = value * move_with.scale;
@@ -417,6 +451,8 @@ fn update_axes(
                 transform.translation.y = value * move_with.scale;
             }
         }
+        
+        // Update text displays
         for (text, text_with_axes) in text_query.iter() {
             if axis_type == text_with_axes.x_axis {
                 *writer.text(text, 1) = format!("{value:.3}");

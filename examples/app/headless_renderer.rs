@@ -1,17 +1,47 @@
-//! This example illustrates how to make headless renderer
-//! derived from: <https://sotrh.github.io/learn-wgpu/showcase/windowless/#a-triangle-without-a-window>
-//! It follows this steps:
+//! # Headless Renderer
+//!
+//! This example demonstrates how to create a headless (no window) renderer using Bevy.
+//! It renders scenes to images without displaying a window, useful for:
+//! - Server-side rendering
+//! - Automated screenshot generation
+//! - CI/CD testing of visual output
+//! - Rendering farms
+//!
+//! ## Architecture Overview
+//!
+//! Bevy normally renders to a window, but this example redirects rendering to an image buffer:
+//! 1. **GPU Rendering**: Camera renders to a GPU texture instead of a window
+//! 2. **GPU→CPU Transfer**: Custom render graph node copies texture to CPU buffer
+//! 3. **Cross-World Communication**: Channel sends data from render world to main world
+//! 4. **Image Saving**: Main world saves the buffer as an image file
+//!
+//! ## Key Concepts
+//!
+//! - **Render World vs Main World**: Bevy runs rendering in a separate ECS world for performance
+//! - **Render Graph**: Node-based system for defining GPU operations
+//! - **Headless Mode**: Running without a display server or window
+//! - **Frame Latency**: Data takes one frame to transfer between worlds
+//!
+//! ## Implementation Steps
+//!
 //! 1. Render from camera to gpu-image render target
 //! 2. Copy from gpu image to buffer using `ImageCopyDriver` node in `RenderGraph`
 //! 3. Copy from buffer to channel using `receive_image_from_buffer` after `RenderSystems::Render`
 //! 4. Save from channel to random named file using `scene::update` at `PostUpdate` in `MainWorld`
 //! 5. Exit if `single_image` setting is set
+//!
+//! Derived from: <https://sotrh.github.io/learn-wgpu/showcase/windowless/#a-triangle-without-a-window>
 
 use bevy::{
+    // App lifecycle and scheduling
     app::{AppExit, ScheduleRunnerPlugin},
+    // Rendering pipeline components
     core_pipeline::tonemapping::Tonemapping,
+    // Image handling utilities
     image::TextureFormatPixelInfo,
+    // Standard Bevy prelude
     prelude::*,
+    // Low-level rendering APIs
     render::{
         camera::RenderTarget,
         render_asset::{RenderAssetUsages, RenderAssets},
@@ -24,44 +54,61 @@ use bevy::{
         renderer::{RenderContext, RenderDevice, RenderQueue},
         Extract, Render, RenderApp, RenderSystems,
     },
+    // Window system (which we'll disable)
     winit::WinitPlugin,
 };
+
+// External crate for multi-threaded channels
+// More efficient than std::sync::mpsc for this use case
 use crossbeam_channel::{Receiver, Sender};
+
+// Standard library imports
 use std::{
+    // For implementing Deref on wrapper types
     ops::{Deref, DerefMut},
+    // File path handling
     path::PathBuf,
+    // Thread synchronization primitives
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    // For frame timing
     time::Duration,
 };
 
-// To communicate between the main world and the render world we need a channel.
-// Since the main world and render world run in parallel, there will always be a frame of latency
-// between the data sent from the render world and the data received in the main world
+// ## Cross-World Communication
 //
-// frame n => render world sends data through the channel at the end of the frame
-// frame n + 1 => main world receives the data
+// Bevy uses two separate ECS worlds for performance:
+// - **Main World**: Runs game logic, physics, input handling
+// - **Render World**: Runs rendering systems in parallel
 //
-// Receiver and Sender are kept in resources because there is single camera and single target
-// That's why there is single images role, if you want to differentiate images
-// from different cameras, you should keep Receiver in ImageCopier and Sender in ImageToSave
-// or send some id with data
+// To communicate between them, we use channels:
+// - Data flows: Render World → Channel → Main World
+// - There's always one frame of latency:
+//   - Frame N: Render world sends data through channel
+//   - Frame N+1: Main world receives and processes data
+//
+// For multiple cameras: Consider storing channels in components instead of resources
 
-/// This will receive asynchronously any data sent from the render world
+/// Resource in main world that receives image data from render world
+/// 
+/// The Deref derive allows us to use this as a regular Receiver
+/// Example: `receiver.recv()` instead of `receiver.0.recv()`
 #[derive(Resource, Deref)]
 struct MainWorldReceiver(Receiver<Vec<u8>>);
 
-/// This will send asynchronously any data to the main world
+/// Resource in render world that sends image data to main world
+///
+/// Wrapped in a newtype to make it a proper Resource
 #[derive(Resource, Deref)]
 struct RenderWorldSender(Sender<Vec<u8>>);
 
-// Parameters of resulting image
+// Configuration for the headless renderer
 struct AppConfig {
-    width: u32,
-    height: u32,
-    single_image: bool,
+    width: u32,         // Width of rendered images in pixels
+    height: u32,        // Height of rendered images in pixels  
+    single_image: bool, // If true, render one frame and exit
 }
 
 fn main() {

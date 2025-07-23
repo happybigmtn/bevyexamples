@@ -1,20 +1,80 @@
 //! Shows how to zoom orthographic and perspective projection cameras.
+//!
+//! ## Key Concepts Demonstrated
+//!
+//! - **Orthographic vs Perspective Projections**: Understanding the fundamental differences
+//! - **Camera Zooming Techniques**: Different approaches for different projection types
+//! - **Mouse Wheel Input**: Processing scroll events for intuitive zoom controls
+//! - **Dynamic Projection Switching**: Runtime switching between projection types
+//! - **Field of View (FOV)**: How FOV affects perspective camera zoom
+//! - **Orthographic Scale**: How scale affects orthographic camera zoom
+//!
+//! ## Projection Types Explained
+//!
+//! **Orthographic Projection:**
+//! - No perspective distortion (parallel lines stay parallel)
+//! - Objects don't get smaller with distance
+//! - Zoom by changing the `scale` value
+//! - Commonly used for 2D games, technical drawings, or top-down views
+//!
+//! **Perspective Projection:**
+//! - Realistic perspective distortion (like human vision)
+//! - Objects get smaller with distance
+//! - Zoom by changing the Field of View (FOV)
+//! - Commonly used for 3D games and realistic rendering
+//!
+//! ## Controls
+//!
+//! - **Mouse Wheel**: Zoom in/out
+//! - **Space**: Switch between orthographic and perspective projections
 
 use std::{f32::consts::PI, ops::Range};
 
-use bevy::{input::mouse::AccumulatedMouseScroll, prelude::*, render::camera::ScalingMode};
+use bevy::{
+    // AccumulatedMouseScroll provides smooth mouse wheel input accumulation across frames
+    input::mouse::AccumulatedMouseScroll,
+    prelude::*,
+    // ScalingMode determines how orthographic projections handle different aspect ratios
+    render::camera::ScalingMode,
+};
 
+/// Configuration resource that stores all camera zoom settings
+/// 
+/// This resource centralizes all zoom-related parameters, making it easy to tweak
+/// the camera behavior without diving into the system code.
 #[derive(Debug, Resource)]
 struct CameraSettings {
-    /// The height of the viewport in world units when the orthographic camera's scale is 1
+    /// The height of the viewport in world units when the orthographic camera's scale is 1.0
+    /// 
+    /// This defines the "default" zoom level for orthographic projection.
+    /// A viewport height of 5.0 means that 5 world units will be visible vertically
+    /// when the scale is 1.0.
     pub orthographic_viewport_height: f32,
-    /// Clamp the orthographic camera's scale to this range
+    
+    /// Valid range for orthographic camera scale values
+    /// 
+    /// Scale works inversely to zoom:
+    /// - scale = 0.5 → zoomed in (shows less area)
+    /// - scale = 2.0 → zoomed out (shows more area)
     pub orthographic_zoom_range: Range<f32>,
-    /// Multiply mouse wheel inputs by this factor when using the orthographic camera
+    
+    /// Sensitivity multiplier for orthographic zoom with mouse wheel
+    /// 
+    /// Higher values = faster zoom response to mouse wheel movement
     pub orthographic_zoom_speed: f32,
-    /// Clamp perspective camera's field of view to this range
+    
+    /// Valid range for perspective camera field of view (in radians)
+    /// 
+    /// FOV works directly with zoom:
+    /// - smaller FOV = zoomed in (narrower view)
+    /// - larger FOV = zoomed out (wider view)
+    /// π radians = 180 degrees (typically the maximum useful FOV)
     pub perspective_zoom_range: Range<f32>,
-    /// Multiply mouse wheel inputs by this factor when using the perspective camera
+    
+    /// Sensitivity multiplier for perspective zoom with mouse wheel
+    /// 
+    /// FOV changes are more visually dramatic than scale changes, so this
+    /// is typically smaller than orthographic_zoom_speed
     pub perspective_zoom_speed: f32,
 }
 
@@ -22,16 +82,27 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(CameraSettings {
+            // ORTHOGRAPHIC SETTINGS
             orthographic_viewport_height: 5.,
-            // In orthographic projections, we specify camera scale relative to a default value of 1,
-            // in which one unit in world space corresponds to one pixel.
+            
+            // Orthographic zoom range: scale values from 0.1 to 10.0
+            // Remember: smaller scale = more zoomed in
+            // 0.1 = very close up, 10.0 = very far away
             orthographic_zoom_range: 0.1..10.0,
-            // This value was hand-tuned to ensure that zooming in and out feels smooth but not slow.
+            
+            // Orthographic zoom speed: tuned for smooth but responsive zooming
+            // This multiplies the mouse wheel delta to determine scale change
             orthographic_zoom_speed: 0.2,
-            // Perspective projections use field of view, expressed in radians. We would
-            // normally not set it to more than π, which represents a 180° FOV.
+            
+            // PERSPECTIVE SETTINGS  
+            // Perspective FOV range in radians:
+            // PI/5 ≈ 36° (zoomed in), PI-0.2 ≈ 168° (zoomed out)
+            // We avoid exactly PI (180°) to prevent rendering issues
             perspective_zoom_range: (PI / 5.)..(PI - 0.2),
-            // Changes in FOV are much more noticeable due to its limited range in radians
+            
+            // Perspective zoom speed: slower than orthographic because
+            // FOV changes are more visually dramatic due to the exponential
+            // nature of perspective projection
             perspective_zoom_speed: 0.05,
         })
         .add_systems(Startup, (setup, instructions))
@@ -39,7 +110,7 @@ fn main() {
         .run();
 }
 
-/// Set up a simple 3D scene
+/// Sets up a simple 3D scene to demonstrate the different projection and zoom behaviors
 fn setup(
     asset_server: Res<AssetServer>,
     camera_settings: Res<CameraSettings>,
@@ -47,20 +118,30 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    // CAMERA SETUP: Start with orthographic projection
     commands.spawn((
         Name::new("Camera"),
         Camera3d::default(),
+        
+        // Start with orthographic projection to demonstrate the difference
         Projection::from(OrthographicProjection {
-            // We can set the scaling mode to FixedVertical to keep the viewport height constant as its aspect ratio changes.
-            // The viewport height is the height of the camera's view in world units when the scale is 1.
+            // SCALING MODE: FixedVertical keeps the vertical viewport constant
+            // as the window aspect ratio changes. This is ideal for many games
+            // where you want consistent vertical coverage.
             scaling_mode: ScalingMode::FixedVertical {
                 viewport_height: camera_settings.orthographic_viewport_height,
             },
-            // This is the default value for scale for orthographic projections.
-            // To zoom in and out, change this value, rather than `ScalingMode` or the camera's position.
+            
+            // INITIAL SCALE: Start at 1.0 (the "neutral" zoom level)
+            // This means the viewport height will be exactly the value
+            // specified in scaling_mode when scale = 1.0
             scale: 1.,
+            
+            // Use default values for all other orthographic settings
             ..OrthographicProjection::default_3d()
         }),
+        
+        // Position camera at an angle to show the 3D scene clearly
         Transform::from_xyz(5.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
@@ -131,38 +212,62 @@ fn switch_projection(
     }
 }
 
+/// Handles zoom input for both orthographic and perspective cameras
+/// 
+/// This system demonstrates the key differences between zooming techniques:
+/// - Orthographic: Change the scale (multiplicatively for smooth feel)
+/// - Perspective: Change the field of view (additively)
 fn zoom(
     camera: Single<&mut Projection, With<Camera>>,
     camera_settings: Res<CameraSettings>,
     mouse_wheel_input: Res<AccumulatedMouseScroll>,
 ) {
-    // Usually, you won't need to handle both types of projection,
-    // but doing so makes for a more complete example.
+    // Pattern match on the projection type to handle each differently
+    // In a real game, you'd typically only support one projection type
     match *camera.into_inner() {
         Projection::Orthographic(ref mut orthographic) => {
-            // We want scrolling up to zoom in, decreasing the scale, so we negate the delta.
+            // ORTHOGRAPHIC ZOOM LOGIC
+            
+            // Negate the delta because we want:
+            // - Scroll up (positive delta) → zoom in (decrease scale)
+            // - Scroll down (negative delta) → zoom out (increase scale)
             let delta_zoom = -mouse_wheel_input.delta.y * camera_settings.orthographic_zoom_speed;
-            // When changing scales, logarithmic changes are more intuitive.
-            // To get this effect, we add 1 to the delta, so that a delta of 0
-            // results in no multiplicative effect, positive values result in a multiplicative increase,
-            // and negative values result in multiplicative decreases.
+            
+            // LOGARITHMIC SCALING for intuitive zoom feel
+            // Instead of additive changes (scale += delta), we use multiplicative changes
+            // This makes zoom feel consistent regardless of current zoom level
+            // 
+            // Math explanation:
+            // - delta_zoom = 0.0 → multiplicative_zoom = 1.0 → no change
+            // - delta_zoom = 0.1 → multiplicative_zoom = 1.1 → 10% larger scale
+            // - delta_zoom = -0.1 → multiplicative_zoom = 0.9 → 10% smaller scale
             let multiplicative_zoom = 1. + delta_zoom;
 
+            // Apply the zoom and clamp to valid range
             orthographic.scale = (orthographic.scale * multiplicative_zoom).clamp(
                 camera_settings.orthographic_zoom_range.start,
                 camera_settings.orthographic_zoom_range.end,
             );
         }
         Projection::Perspective(ref mut perspective) => {
-            // We want scrolling up to zoom in, decreasing the scale, so we negate the delta.
+            // PERSPECTIVE ZOOM LOGIC
+            
+            // Again, negate for intuitive scroll direction
             let delta_zoom = -mouse_wheel_input.delta.y * camera_settings.perspective_zoom_speed;
 
-            // Adjust the field of view, but keep it within our stated range.
+            // ADDITIVE FOV CHANGES work well for perspective
+            // FOV has a smaller useful range (typically 30°-120°) so multiplicative
+            // changes would be too dramatic. Linear changes feel more natural.
+            // 
+            // Remember: smaller FOV = more zoomed in, larger FOV = more zoomed out
             perspective.fov = (perspective.fov + delta_zoom).clamp(
                 camera_settings.perspective_zoom_range.start,
                 camera_settings.perspective_zoom_range.end,
             );
         }
-        _ => (),
+        _ => {
+            // Handle custom projections or unsupported types
+            // In this example, we just ignore them
+        }
     }
 }

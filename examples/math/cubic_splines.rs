@@ -1,4 +1,11 @@
 //! This example exhibits different available modes of constructing cubic Bezier curves.
+//!
+//! Cubic splines are like drawing smooth curves through a connect-the-dots puzzle - but instead
+//! of straight lines between dots, we use mathematically perfect curves! Think of it like
+//! bending a flexible metal rod through a series of points. Different spline types (Hermite,
+//! Cardinal, B-spline) are like using different materials for the rod - each bends differently
+//! but all create smooth paths. This is essential for animation paths, camera movements, and
+//! any smooth motion in games!
 
 use bevy::{
     app::{App, Startup, Update},
@@ -33,25 +40,29 @@ fn main() {
 }
 
 fn setup(mut commands: Commands) {
+    // SPLINE CONFIGURATION - Set up our curve-drawing toolkit
     // Initialize the modes with their defaults:
-    let spline_mode = SplineMode::default();
+    let spline_mode = SplineMode::default();  // Hermite by default
     commands.insert_resource(spline_mode);
-    let cycling_mode = CyclingMode::default();
+    let cycling_mode = CyclingMode::default(); // Non-cyclic by default
     commands.insert_resource(cycling_mode);
 
+    // INITIAL CURVE SHAPE - A wavy demonstration curve
     // Starting data for [`ControlPoints`]:
     let default_points = vec![
-        vec2(-500., -200.),
-        vec2(-250., 250.),
-        vec2(250., 250.),
-        vec2(500., -200.),
+        vec2(-500., -200.),  // Bottom left
+        vec2(-250., 250.),   // Top left
+        vec2(250., 250.),    // Top right
+        vec2(500., -200.),   // Bottom right
     ];
 
+    // TANGENT VECTORS - Control the curve's direction at each point
+    // Like specifying which way the curve should "leave" each point
     let default_tangents = vec![
-        vec2(0., 200.),
-        vec2(200., 0.),
-        vec2(0., -200.),
-        vec2(-200., 0.),
+        vec2(0., 200.),      // Point up
+        vec2(200., 0.),      // Point right
+        vec2(0., -200.),     // Point down
+        vec2(-200., 0.),     // Point left
     ];
 
     let default_control_data = ControlPoints {
@@ -97,14 +108,15 @@ fn setup(mut commands: Commands) {
 // Curve-related Resources and Systems
 // -----------------------------------
 
+/// SPLINE TYPES - Different mathematical recipes for smooth curves
 /// The current spline mode, which determines the spline method used in conjunction with the
 /// control points.
 #[derive(Clone, Copy, Resource, Default)]
 enum SplineMode {
     #[default]
-    Hermite,
-    Cardinal,
-    B,
+    Hermite,   // Uses points AND tangents - like specifying position and velocity
+    Cardinal,  // Auto-calculates tangents - smoother but less control
+    B,         // B-spline - curve doesn't pass through points, but very smooth
 }
 
 impl std::fmt::Display for SplineMode {
@@ -117,13 +129,14 @@ impl std::fmt::Display for SplineMode {
     }
 }
 
+/// LOOP CONTROL - Should the curve connect back to the start?
 /// The current cycling mode, which determines whether the control points should be interpolated
 /// cyclically (to make a loop).
 #[derive(Clone, Copy, Resource, Default)]
 enum CyclingMode {
     #[default]
-    NotCyclic,
-    Cyclic,
+    NotCyclic,  // Open curve - has distinct start and end
+    Cyclic,     // Closed loop - perfect for race tracks or patrol paths!
 }
 
 impl std::fmt::Display for CyclingMode {
@@ -140,13 +153,15 @@ impl std::fmt::Display for CyclingMode {
 #[derive(Clone, Default, Resource)]
 struct Curve(Option<CubicCurve<Vec2>>);
 
+/// CURVE BLUEPRINT - The dots and directions that define our curve
 /// The control points used to generate a curve. The tangent components are only used in the case of
 /// Hermite interpolation.
 #[derive(Clone, Resource)]
 struct ControlPoints {
-    points_and_tangents: Vec<(Vec2, Vec2)>,
+    points_and_tangents: Vec<(Vec2, Vec2)>,  // Each point paired with its tangent vector
 }
 
+/// CURVE REGENERATION - Rebuild the curve when settings change
 /// This system is responsible for updating the [`Curve`] when the [control points] or active modes
 /// change.
 ///
@@ -157,27 +172,35 @@ fn update_curve(
     cycling_mode: Res<CyclingMode>,
     mut curve: ResMut<Curve>,
 ) {
+    // CHANGE DETECTION - Only recalculate when something actually changed
     if !control_points.is_changed() && !spline_mode.is_changed() && !cycling_mode.is_changed() {
-        return;
+        return;  // Save computation if nothing changed
     }
 
+    // REBUILD THE CURVE - Apply new settings
     *curve = form_curve(&control_points, *spline_mode, *cycling_mode);
 }
 
+/// CURVE VISUALIZATION - Draw the smooth curve as many tiny line segments
 /// This system uses gizmos to draw the current [`Curve`] by breaking it up into a large number
 /// of line segments.
 fn draw_curve(curve: Res<Curve>, mut gizmos: Gizmos) {
     let Some(ref curve) = curve.0 else {
-        return;
+        return;  // No curve to draw yet
     };
+    // ADAPTIVE DETAIL - More segments = more complex curve
     // Scale resolution with curve length so it doesn't degrade as the length increases.
     let resolution = 100 * curve.segments().len();
+    
+    // POLYLINE APPROXIMATION - Draw curve as connected line segments
+    // Like drawing a circle with many straight lines - looks smooth from far enough!
     gizmos.linestrip(
         curve.iter_positions(resolution).map(|pt| pt.extend(0.0)),
-        Color::srgb(1.0, 1.0, 1.0),
+        Color::srgb(1.0, 1.0, 1.0),  // White curve
     );
 }
 
+/// CONTROL POINT VISUALIZATION - Show the skeleton of our curve
 /// This system uses gizmos to draw the current [control points] as circles, displaying their
 /// tangent vectors as arrows in the case of a Hermite spline.
 ///
@@ -188,14 +211,18 @@ fn draw_control_points(
     mut gizmos: Gizmos,
 ) {
     for &(point, tangent) in &control_points.points_and_tangents {
-        gizmos.circle_2d(point, 10.0, Color::srgb(0.0, 1.0, 0.0));
+        // CONTROL POINTS - The dots we're connecting
+        gizmos.circle_2d(point, 10.0, Color::srgb(0.0, 1.0, 0.0));  // Green circles
 
+        // TANGENT ARROWS - Show curve direction (Hermite only)
         if matches!(*spline_mode, SplineMode::Hermite) {
+            // Red arrows show which way the curve "flows" through each point
             gizmos.arrow_2d(point, point + tangent, Color::srgb(1.0, 0.0, 0.0));
         }
     }
 }
 
+/// THE CURVE FACTORY - Transform control points into smooth curves
 /// Helper function for generating a [`Curve`] from [control points] and selected modes.
 ///
 /// [control points]: ControlPoints
@@ -204,11 +231,14 @@ fn form_curve(
     spline_mode: SplineMode,
     cycling_mode: CyclingMode,
 ) -> Curve {
+    // UNZIP DATA - Separate points from their tangents
     let (points, tangents): (Vec<_>, Vec<_>) =
         control_points.points_and_tangents.iter().copied().unzip();
 
+    // SPLINE SELECTION - Different math for different curve types
     match spline_mode {
         SplineMode::Hermite => {
+            // HERMITE - Full control with points AND tangents
             let spline = CubicHermite::new(points, tangents);
             Curve(match cycling_mode {
                 CyclingMode::NotCyclic => spline.to_curve().ok(),
@@ -216,6 +246,7 @@ fn form_curve(
             })
         }
         SplineMode::Cardinal => {
+            // CARDINAL - Catmull-Rom auto-calculates smooth tangents
             let spline = CubicCardinalSpline::new_catmull_rom(points);
             Curve(match cycling_mode {
                 CyclingMode::NotCyclic => spline.to_curve().ok(),
@@ -223,6 +254,7 @@ fn form_curve(
             })
         }
         SplineMode::B => {
+            // B-SPLINE - Ultra smooth but doesn't touch control points
             let spline = CubicBSpline::new(points);
             Curve(match cycling_mode {
                 CyclingMode::NotCyclic => spline.to_curve().ok(),
@@ -278,13 +310,14 @@ fn update_cycling_mode_text(
 // Input-related Resources and Systems
 // -----------------------------------
 
+/// DRAG GESTURE TRACKER - State machine for click-and-drag curve editing
 /// A small state machine which tracks a click-and-drag motion used to create new control points.
 ///
 /// When the user is not doing a click-and-drag motion, the `start` field is `None`. When the user
 /// presses the left mouse button, the location of that press is temporarily stored in the field.
 #[derive(Clone, Default, Resource)]
 struct MouseEditMove {
-    start: Option<Vec2>,
+    start: Option<Vec2>,  // Where the drag started (None = not dragging)
 }
 
 /// The current mouse position, if known.
@@ -301,6 +334,7 @@ fn handle_mouse_move(
     }
 }
 
+/// INTERACTIVE CURVE EDITING - Click and drag to add points with tangents
 /// This system handles updating the [`MouseEditMove`] resource, orchestrating the logical part
 /// of the click-and-drag motion which actually creates new control points.
 fn handle_mouse_press(
@@ -311,33 +345,37 @@ fn handle_mouse_press(
     camera: Single<(&Camera, &GlobalTransform)>,
 ) {
     let Some(mouse_pos) = mouse_position.0 else {
-        return;
+        return;  // No mouse position to work with
     };
 
+    // GESTURE RECOGNITION - Process mouse button events
     // Handle click and drag behavior
     for button_event in button_events.read() {
         if button_event.button != MouseButton::Left {
-            continue;
+            continue;  // Only left click creates points
         }
 
         match button_event.state {
             ButtonState::Pressed => {
                 if edit_move.start.is_some() {
                     // If the edit move already has a start, press event should do nothing.
-                    continue;
+                    continue;  // Already dragging
                 }
+                // START DRAG - Remember where we clicked
                 // This press represents the start of the edit move.
                 edit_move.start = Some(mouse_pos);
             }
 
             ButtonState::Released => {
+                // COMPLETE DRAG - Time to create the new control point
                 // Release is only meaningful if we started an edit move.
                 let Some(start) = edit_move.start else {
-                    continue;
+                    continue;  // Not dragging, ignore release
                 };
 
                 let (camera, camera_transform) = *camera;
 
+                // COORDINATE CONVERSION - Screen space to world space
                 // Convert the starting point and end point (current mouse pos) into world coords:
                 let Ok(point) = camera.viewport_to_world_2d(camera_transform, start) else {
                     continue;
@@ -345,19 +383,23 @@ fn handle_mouse_press(
                 let Ok(end_point) = camera.viewport_to_world_2d(camera_transform, mouse_pos) else {
                     continue;
                 };
-                let tangent = end_point - point;
+                
+                // TANGENT CALCULATION - Drag vector becomes curve direction
+                let tangent = end_point - point;  // Vector from start to end of drag
 
+                // CREATE CONTROL POINT - Click position + drag direction
                 // The start of the click-and-drag motion represents the point to add,
                 // while the difference with the current position represents the tangent.
                 control_points.points_and_tangents.push((point, tangent));
 
-                // Reset the edit move since we've consumed it.
+                // RESET STATE - Ready for next drag
                 edit_move.start = None;
             }
         }
     }
 }
 
+/// DRAG PREVIEW - Show the user what they're creating while dragging
 /// This system handles drawing the "preview" control point based on the state of [`MouseEditMove`].
 fn draw_edit_move(
     edit_move: Res<MouseEditMove>,
@@ -366,7 +408,7 @@ fn draw_edit_move(
     camera: Single<(&Camera, &GlobalTransform)>,
 ) {
     let Some(start) = edit_move.start else {
-        return;
+        return;  // Not dragging, nothing to preview
     };
     let Some(mouse_pos) = mouse_position.0 else {
         return;
@@ -374,6 +416,7 @@ fn draw_edit_move(
 
     let (camera, camera_transform) = *camera;
 
+    // COORDINATE TRANSFORMATION - Convert UI coords to game world
     // Resources store data in viewport coordinates, so we need to convert to world coordinates
     // to display them:
     let Ok(start) = camera.viewport_to_world_2d(camera_transform, start) else {
@@ -383,11 +426,13 @@ fn draw_edit_move(
         return;
     };
 
-    gizmos.circle_2d(start, 10.0, Color::srgb(0.0, 1.0, 0.7));
-    gizmos.circle_2d(start, 7.0, Color::srgb(0.0, 1.0, 0.7));
-    gizmos.arrow_2d(start, end, Color::srgb(1.0, 0.0, 0.7));
+    // PREVIEW VISUALIZATION - Show what will be created
+    gizmos.circle_2d(start, 10.0, Color::srgb(0.0, 1.0, 0.7));  // Outer ring
+    gizmos.circle_2d(start, 7.0, Color::srgb(0.0, 1.0, 0.7));   // Inner ring (double circle)
+    gizmos.arrow_2d(start, end, Color::srgb(1.0, 0.0, 0.7));     // Tangent preview
 }
 
+/// KEYBOARD CONTROLS - Hotkeys for curve manipulation
 /// This system handles all keyboard commands.
 fn handle_keypress(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -395,25 +440,25 @@ fn handle_keypress(
     mut cycling_mode: ResMut<CyclingMode>,
     mut control_points: ResMut<ControlPoints>,
 ) {
-    // S => change spline mode
+    // S => SPLINE TYPE CYCLING - Try different curve mathematics
     if keyboard.just_pressed(KeyCode::KeyS) {
         *spline_mode = match *spline_mode {
-            SplineMode::Hermite => SplineMode::Cardinal,
-            SplineMode::Cardinal => SplineMode::B,
-            SplineMode::B => SplineMode::Hermite,
+            SplineMode::Hermite => SplineMode::Cardinal,   // Full control -> Auto smooth
+            SplineMode::Cardinal => SplineMode::B,         // Auto smooth -> Ultra smooth
+            SplineMode::B => SplineMode::Hermite,          // Ultra smooth -> Full control
         }
     }
 
-    // C => change cycling mode
+    // C => LOOP TOGGLE - Make the curve connect back to start
     if keyboard.just_pressed(KeyCode::KeyC) {
         *cycling_mode = match *cycling_mode {
-            CyclingMode::NotCyclic => CyclingMode::Cyclic,
-            CyclingMode::Cyclic => CyclingMode::NotCyclic,
+            CyclingMode::NotCyclic => CyclingMode::Cyclic,     // Open -> Closed loop
+            CyclingMode::Cyclic => CyclingMode::NotCyclic,     // Closed -> Open
         }
     }
 
-    // R => remove last control point
+    // R => UNDO - Remove the most recent control point
     if keyboard.just_pressed(KeyCode::KeyR) {
-        control_points.points_and_tangents.pop();
+        control_points.points_and_tangents.pop();  // Delete from the end
     }
 }

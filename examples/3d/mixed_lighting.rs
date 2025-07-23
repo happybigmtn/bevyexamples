@@ -1,25 +1,60 @@
 //! Demonstrates how to combine baked and dynamic lighting.
+//!
+//! # Understanding Lighting Modes in Games
+//!
+//! Games use different approaches to lighting, each with trade-offs:
+//!
+//! ## 1. Baked Lighting (Pre-computed)
+//! - All lighting calculated offline and stored in textures (lightmaps)
+//! - Pros: Beautiful global illumination, soft shadows, color bleeding
+//! - Cons: Static only - can't move objects or lights
+//! - Use case: Architecture visualization, static environments
+//!
+//! ## 2. Real-time Lighting (Dynamic)
+//! - All lighting calculated every frame
+//! - Pros: Everything can move and change
+//! - Cons: No global illumination, expensive for many lights
+//! - Use case: Dynamic games, destructible environments
+//!
+//! ## 3. Mixed Lighting (Hybrid)
+//! - Combines baked and real-time techniques
+//! - Static objects use lightmaps, dynamic objects use real-time
+//! - Best of both worlds but more complex to set up
+//!
+//! This example demonstrates all three approaches and lets you switch between them
+//! to see the differences. Pay attention to:
+//! - The red color bleeding from the floor onto the sphere (indirect light)
+//! - Shadow quality and softness
+//! - Which objects can move and which can't
 
 use bevy::{
-    gltf::GltfMeshName,
-    pbr::Lightmap,
-    picking::{backend::HitData, pointer::PointerInteraction},
+    gltf::GltfMeshName,    // Component storing mesh names from GLTF files
+    pbr::Lightmap,         // Component for applying pre-baked lighting
+    picking::{
+        backend::HitData,           // Data about where a ray hit
+        pointer::PointerInteraction, // Mouse/touch interaction data
+    },
     prelude::*,
-    scene::SceneInstanceReady,
+    scene::SceneInstanceReady, // Event fired when a scene finishes loading
 };
 
 use crate::widgets::{RadioButton, RadioButtonText, WidgetClickEvent, WidgetClickSender};
 
+// Include UI widget helpers
 #[path = "../helpers/widgets.rs"]
 mod widgets;
 
 /// How bright the lightmaps are.
+/// Higher values make the baked lighting more visible.
+/// This compensates for the lightmap being in a different color space.
 const LIGHTMAP_EXPOSURE: f32 = 600.0;
 
 /// How far above the ground the sphere's origin is when moved, in scene units.
+/// This prevents the sphere from clipping into the floor.
 const SPHERE_OFFSET: f32 = 0.2;
 
 /// The settings that the user has currently chosen for the app.
+/// Resources in Bevy are global data accessible from any system.
 #[derive(Clone, Default, Resource)]
 struct AppStatus {
     /// The lighting mode that the user currently has set: baked, mixed, or
@@ -35,6 +70,11 @@ enum LightingMode {
     /// In this mode, the sphere can't be moved, as the light shining on it was
     /// precomputed. On the plus side, the sphere has indirect lighting in this
     /// mode, as the red hue on the bottom of the sphere demonstrates.
+    /// 
+    /// Technical details:
+    /// - Direct light: Light rays from light source to surface (baked)
+    /// - Indirect light: Light that bounced off other surfaces (baked)
+    /// - The red floor color "bleeds" onto the sphere bottom via light bounces
     Baked,
 
     /// All light for the static objects is computed ahead of time, but the
@@ -46,6 +86,8 @@ enum LightingMode {
     /// scene has indirect illumination. Note also that the sphere doesn't cast
     /// a shadow on the static objects in this mode, because shadows are part of
     /// the lighting computation.
+    /// 
+    /// Use case: Static world with moveable characters/objects
     MixedDirect,
 
     /// Indirect light for the static objects is computed ahead of time, and
@@ -57,6 +99,11 @@ enum LightingMode {
     /// scene has indirect illumination. The sphere does cast a shadow on
     /// objects in this mode, because the direct light for all objects is being
     /// computed dynamically.
+    /// 
+    /// This is often the best compromise for games - you get:
+    /// - Beautiful indirect lighting on static geometry
+    /// - Dynamic shadows from all objects
+    /// - Moveable objects with correct direct lighting
     #[default]
     MixedIndirect,
 
@@ -66,6 +113,9 @@ enum LightingMode {
     /// lit, which provides maximum flexibility. However, the downside is that
     /// global illumination is lost; note that the base of the sphere isn't red
     /// as it is in baked mode.
+    /// 
+    /// Performance note: This is the most expensive mode but allows
+    /// complete freedom - everything can move and change
     RealTime,
 }
 
@@ -81,13 +131,19 @@ struct HelpText;
 /// The name of every static object in the scene that has a lightmap, as well as
 /// the UV rect of its lightmap.
 ///
+/// Lightmap UV rectangles define which part of the lightmap texture
+/// corresponds to each object. Think of it like a texture atlas where
+/// different objects use different regions of the same texture.
+///
 /// Storing this as an array and doing a linear search through it is rather
 /// inefficient, but we do it anyway for clarity's sake.
 static LIGHTMAPS: [(&str, Rect); 5] = [
+    // Floor plane - uses a large portion of the lightmap
     (
         "Plane",
         uv_rect_opengl(Vec2::splat(0.026), Vec2::splat(0.710)),
     ),
+    // Chair components - each uses a smaller region
     (
         "SheenChair_fabric",
         uv_rect_opengl(vec2(0.7864, 0.02377), vec2(0.1910, 0.1912)),
@@ -123,25 +179,32 @@ fn main() {
             }),
             ..default()
         }))
+        // Enable mesh picking for clicking on objects
         .add_plugins(MeshPickingPlugin)
+        // Configure ambient light
         .insert_resource(AmbientLight {
             color: ClearColor::default().0,
             brightness: 10000.0,
+            // Important: ambient light should affect lightmapped meshes
+            // Otherwise they'd be black in areas not hit by direct light
             affects_lightmapped_meshes: true,
         })
         .init_resource::<AppStatus>()
+        // Custom events for UI interaction
         .add_event::<WidgetClickEvent<LightingMode>>()
         .add_event::<LightingModeChanged>()
+        // Setup system
         .add_systems(Startup, setup)
-        .add_systems(Update, update_lightmaps)
-        .add_systems(Update, update_directional_light)
-        .add_systems(Update, make_sphere_nonpickable)
-        .add_systems(Update, update_radio_buttons)
-        .add_systems(Update, handle_lighting_mode_change)
+        // Update systems - each handles a specific aspect
+        .add_systems(Update, update_lightmaps)          // Apply/remove lightmaps
+        .add_systems(Update, update_directional_light)  // Configure sun light
+        .add_systems(Update, make_sphere_nonpickable)   // Prevent clicking sphere
+        .add_systems(Update, update_radio_buttons)      // UI state
+        .add_systems(Update, handle_lighting_mode_change) // Process mode changes
         .add_systems(Update, widgets::handle_ui_interactions::<LightingMode>)
-        .add_systems(Update, reset_sphere_position)
-        .add_systems(Update, move_sphere)
-        .add_systems(Update, adjust_help_text)
+        .add_systems(Update, reset_sphere_position)     // Reset sphere in baked mode
+        .add_systems(Update, move_sphere)               // Handle sphere movement
+        .add_systems(Update, adjust_help_text)          // Update help text
         .run();
 }
 
@@ -233,16 +296,21 @@ fn update_lightmaps(
     }
 
     // Select the lightmap to use, based on the lighting mode.
+    // Each lightmap was baked with different settings:
     let lightmap: Option<Handle<Image>> = match app_status.lighting_mode {
+        // Baked: Contains both direct and indirect lighting for all objects
         LightingMode::Baked => {
             Some(asset_server.load("lightmaps/MixedLightingExample-Baked.zstd.ktx2"))
         }
+        // MixedDirect: Contains direct+indirect for static objects only
         LightingMode::MixedDirect => {
             Some(asset_server.load("lightmaps/MixedLightingExample-MixedDirect.zstd.ktx2"))
         }
+        // MixedIndirect: Contains only indirect lighting for static objects
         LightingMode::MixedIndirect => {
             Some(asset_server.load("lightmaps/MixedLightingExample-MixedIndirect.zstd.ktx2"))
         }
+        // RealTime: No lightmaps at all
         LightingMode::RealTime => None,
     };
 
@@ -307,10 +375,15 @@ fn update_lightmaps(
 /// lower left) to the Vulkan coordinate system (origin in the upper left) that
 /// Bevy uses.
 ///
+/// UV coordinates map 2D texture positions to 3D surfaces:
+/// - OpenGL: (0,0) is bottom-left, Y increases upward
+/// - Vulkan/Bevy: (0,0) is top-left, Y increases downward
+///
 /// For this particular example, the baking tool happened to use the OpenGL
 /// coordinate system, so it was more convenient to do the conversion at compile
 /// time than to pre-calculate and hard-code the values.
 const fn uv_rect_opengl(gl_min: Vec2, size: Vec2) -> Rect {
+    // Flip Y coordinate: new_y = 1.0 - old_y - height
     let min = vec2(gl_min.x, 1.0 - gl_min.y - size.y);
     Rect {
         min,
@@ -346,12 +419,16 @@ fn update_directional_light(
 
     // Real-time direct light is used on the scenery if we're using mixed
     // indirect or real-time mode.
+    // In Baked and MixedDirect modes, direct light comes from the lightmap
     let scenery_is_lit_in_real_time = matches!(
         app_status.lighting_mode,
         LightingMode::MixedIndirect | LightingMode::RealTime
     );
 
     for mut light in &mut lights {
+        // This flag controls whether the directional light affects
+        // objects that have lightmaps. We disable it when direct
+        // lighting is already baked into the lightmap.
         light.affects_lightmapped_mesh_diffuse = scenery_is_lit_in_real_time;
         // Don't bother enabling shadows if they won't show up on the scenery.
         light.shadows_enabled = scenery_is_lit_in_real_time;
@@ -401,9 +478,12 @@ fn handle_lighting_mode_change(
 /// Moves the sphere to its original position when the user selects the baked
 /// lighting mode.
 ///
-/// As the light from the sphere is precomputed and depends on the sphere's
-/// original position, the sphere must be placed there in order for the lighting
-/// to be correct.
+/// Why is this necessary? Lightmaps store pre-calculated lighting based on
+/// where objects were when the lighting was baked. If we move the sphere,
+/// the lighting on it would be wrong - it would show lighting from its
+/// original position, not its current position. This is the fundamental
+/// limitation of baked lighting: everything must stay where it was when
+/// the lighting was calculated.
 fn reset_sphere_position(
     mut objects: Query<(&Name, &mut Transform)>,
     mut lighting_mode_change_event_reader: EventReader<LightingModeChanged>,
@@ -428,6 +508,10 @@ fn reset_sphere_position(
 
 /// Updates the position of the sphere when the user clicks on a spot in the
 /// scene.
+///
+/// This demonstrates the key difference between baked and dynamic lighting:
+/// - In baked mode, objects can't move (lighting is pre-calculated)
+/// - In other modes, objects can move freely (lighting is real-time)
 ///
 /// Note that the position of the sphere is locked in baked lighting mode.
 fn move_sphere(

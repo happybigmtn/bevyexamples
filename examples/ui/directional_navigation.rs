@@ -1,88 +1,145 @@
-//! Demonstrates how to set up the directional navigation system to allow for navigation between widgets.
-//!
-//! Directional navigation is generally used to move between widgets in a user interface using arrow keys or gamepad input.
-//! When compared to tab navigation, directional navigation is generally more direct, and less aware of the structure of the UI.
-//!
-//! In this example, we will set up a simple UI with a grid of buttons that can be navigated using the arrow keys or gamepad input.
+//! # UI Directional Navigation Example
+//! 
+//! This example demonstrates how to create accessible, keyboard and gamepad-navigable UI systems in Bevy 0.16.
+//! 
+//! ## What You'll Learn
+//! - How to set up directional navigation with `DirectionalNavigationPlugin`
+//! - Creating navigation graphs that connect UI elements spatially
+//! - Handling keyboard and gamepad input for navigation
+//! - Managing focus states and visual feedback for accessibility
+//! - Converting navigation input into simulated click events
+//! - Building input action mapping systems for flexible control schemes
+//! - Creating grid-based UI layouts that support navigation
+//! 
+//! ## Key Concepts
+//! - **Directional Navigation**: Moving between UI elements based on spatial relationships (up/down/left/right)
+//! - **Navigation Graph**: A data structure that defines which elements can be reached from each other
+//! - **Input Focus**: The currently selected UI element that will receive input
+//! - **Focus Visibility**: Whether focus indicators should be displayed to the user
+//! - **Action Mapping**: Converting raw input (keys/buttons) into semantic actions
+//! - **Compass Octants**: 8-directional system (N, NE, E, SE, S, SW, W, NW) for navigation
+//! - **Spatial UI**: UI design that considers the physical arrangement of elements
+//! 
+//! ## Navigation vs Tab Navigation
+//! - **Directional Navigation**: Moves based on visual/spatial relationships (like a TV remote)
+//! - **Tab Navigation**: Moves through elements in document order (like web pages)
+//! - Directional navigation is more intuitive for grid layouts and game-like interfaces
+//! 
+//! ## Controls
+//! - Arrow Keys or D-Pad: Navigate between buttons
+//! - Enter or South gamepad button (A): Activate focused button
+//! - Visual focus indicator shows which button is currently selected
 
 use std::time::Duration;
 
+// Essential imports for building a navigable UI system
 use bevy::{
     input_focus::{
         directional_navigation::{
-            DirectionalNavigation, DirectionalNavigationMap, DirectionalNavigationPlugin,
+            DirectionalNavigation,     // System for moving focus between elements
+            DirectionalNavigationMap, // Graph structure connecting navigable elements
+            DirectionalNavigationPlugin, // Plugin that enables navigation functionality
         },
-        InputDispatchPlugin, InputFocus, InputFocusVisible,
+        InputDispatchPlugin,    // Plugin for managing input focus
+        InputFocus,            // Resource tracking which element has focus
+        InputFocusVisible,     // Resource controlling focus indicator visibility
     },
-    math::{CompassOctant, FloatOrd},
+    math::{CompassOctant, FloatOrd}, // Direction system and float ordering
     picking::{
-        backend::HitData,
-        pointer::{Location, PointerId},
+        backend::HitData,      // Data about what was clicked/interacted with
+        pointer::{Location, PointerId}, // Pointer location and identification
     },
-    platform::collections::{HashMap, HashSet},
-    prelude::*,
-    render::camera::NormalizedRenderTarget,
+    platform::collections::{HashMap, HashSet}, // Cross-platform collection types
+    prelude::*,                                 // Core Bevy types
+    render::camera::NormalizedRenderTarget,     // Camera target for pointer events
 };
 
 fn main() {
     App::new()
-        // Input focus is not enabled by default, so we need to add the corresponding plugins
+        // Input focus and navigation are not enabled by default in Bevy
+        // We need to explicitly add these plugins to enable the functionality
         .add_plugins((
-            DefaultPlugins,
-            InputDispatchPlugin,
-            DirectionalNavigationPlugin,
+            DefaultPlugins,                    // Standard Bevy systems
+            InputDispatchPlugin,               // Manages input focus and dispatch
+            DirectionalNavigationPlugin,       // Enables directional navigation
         ))
-        // This resource is canonically used to track whether or not to render a focus indicator
-        // It starts as false, but we set it to true here as we would like to see the focus indicator
+        
+        // InputFocusVisible controls whether focus indicators are shown to users
+        // It defaults to false (hidden), but we want visible feedback for this demo
         .insert_resource(InputFocusVisible(true))
-        // We've made a simple resource to keep track of the actions that are currently being pressed for this example
+        
+        // Initialize our custom resource for tracking input actions
+        // This creates an action mapping layer between raw input and game actions
         .init_resource::<ActionState>()
+        
+        // Set up the UI once when the app starts
         .add_systems(Startup, setup_ui)
-        // Input is generally handled during PreUpdate
-        // We're turning inputs into actions first, then using those actions to determine navigation
+        
+        // Input processing happens during PreUpdate to ensure consistency
+        // We chain these systems to guarantee processing order:
+        // 1. Read input and convert to actions
+        // 2. Use actions to navigate the UI
         .add_systems(PreUpdate, (process_inputs, navigate).chain())
+        
+        // Visual and interaction systems run during the main Update phase
         .add_systems(
             Update,
             (
-                // We need to show which button is currently focused
+                // Update visual focus indicators to show which element is selected
                 highlight_focused_element,
-                // Pressing the "Interact" button while we have a focused element should simulate a click
+                
+                // Convert navigation "select" action into simulated click events
                 interact_with_focused_button,
-                // We're doing a tiny animation when the button is interacted with,
-                // so we need a timer and a polling mechanism to reset it
+                
+                // Handle button press animations and reset them after a timeout
                 reset_button_after_interaction,
             ),
         )
-        // This observer is added globally, so it will respond to *any* trigger of the correct type.
-        // However, we're filtering in the observer's query to only respond to button presses
+        
+        // Global observer that responds to button click events from any source
+        // This demonstrates unified handling of mouse clicks and simulated clicks
         .add_observer(universal_button_click_behavior)
-        .run();
+        .run(); // Start the application loop
 }
 
-const NORMAL_BUTTON: Srgba = bevy::color::palettes::tailwind::BLUE_400;
-const PRESSED_BUTTON: Srgba = bevy::color::palettes::tailwind::BLUE_500;
-const FOCUSED_BORDER: Srgba = bevy::color::palettes::tailwind::BLUE_50;
+// Color scheme constants for consistent visual feedback
+// Using Tailwind color palette provides professional, accessible color choices
+const NORMAL_BUTTON: Srgba = bevy::color::palettes::tailwind::BLUE_400;  // Default button color
+const PRESSED_BUTTON: Srgba = bevy::color::palettes::tailwind::BLUE_500; // Darker when pressed
+const FOCUSED_BORDER: Srgba = bevy::color::palettes::tailwind::BLUE_50;  // Light border for focus
 
-// This observer will be triggered whenever a button is pressed
-// In a real project, each button would also have its own unique behavior,
-// to capture the actual intent of the user
+// Observer function that responds to button click events from any source
+// This creates unified behavior for both mouse clicks and keyboard/gamepad interactions
+// In a real application, each button would have additional unique behaviors
 fn universal_button_click_behavior(
-    mut trigger: Trigger<Pointer<Click>>,
+    mut trigger: Trigger<Pointer<Click>>,  // Event data including which entity was clicked
     mut button_query: Query<(&mut BackgroundColor, &mut ResetTimer)>,
 ) {
-    let button_entity = trigger.target();
+    let button_entity = trigger.target(); // Get the entity that was clicked
+    
+    // Check if the clicked entity is a button with the required components
     if let Ok((mut color, mut reset_timer)) = button_query.get_mut(button_entity) {
-        // This would be a great place to play a little sound effect too!
+        // Visual feedback: change button color to indicate it was pressed
         color.0 = PRESSED_BUTTON.into();
+        
+        // Start a timer to reset the button color after a short delay
+        // This creates a brief "flash" animation to confirm the interaction
         reset_timer.0 = Timer::from_seconds(0.3, TimerMode::Once);
 
-        // Picking events propagate up the hierarchy,
-        // so we need to stop the propagation here now that we've handled it
+        // Stop event propagation to prevent parent elements from also responding
+        // This is important in hierarchical UI structures
         trigger.propagate(false);
+        
+        // TODO: In a real game, this would be an excellent place to:
+        // - Play button click sound effects
+        // - Trigger haptic feedback on gamepads
+        // - Log user interaction analytics
     }
 }
 
-/// Resets a UI element to its default state when the timer has elapsed.
+// Component that automatically resets UI elements after a timed delay
+// Deref and DerefMut allow us to use this like a Timer directly
+// This pattern is useful for temporary visual effects
 #[derive(Component, Default, Deref, DerefMut)]
 struct ResetTimer(Timer);
 
@@ -227,15 +284,20 @@ fn setup_ui(
     input_focus.set(top_left_entity);
 }
 
-// The indirection between inputs and actions allows us to easily remap inputs
-// and handle multiple input sources (keyboard, gamepad, etc.) in our game
+// Action mapping enum - the key to flexible input handling
+// This creates a layer of abstraction between physical inputs and game actions
+// Benefits:
+// - Easy remapping of controls without changing game logic
+// - Support for multiple input devices (keyboard + gamepad)
+// - Cleaner, more readable code than checking raw input everywhere
+// - Consistent behavior across different input methods
 #[derive(Debug, PartialEq, Eq, Hash)]
 enum DirectionalNavigationAction {
-    Up,
-    Down,
-    Left,
-    Right,
-    Select,
+    Up,     // Move focus to element above current
+    Down,   // Move focus to element below current  
+    Left,   // Move focus to element left of current
+    Right,  // Move focus to element right of current
+    Select, // Activate/click the currently focused element
 }
 
 impl DirectionalNavigationAction {

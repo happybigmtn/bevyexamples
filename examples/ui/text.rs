@@ -2,6 +2,10 @@
 //!
 //! It displays the current FPS in the top left corner, as well as text that changes color
 //! in the bottom right. For text within a scene, please see the text2d example.
+//!
+//! Text in UI is like digital typography - we can change content, color, size, and style
+//! dynamically. This example shows both static text and text that updates every frame,
+//! demonstrating the reactive nature of UI systems.
 
 use bevy::{
     color::palettes::css::GOLD,
@@ -11,11 +15,16 @@ use bevy::{
 
 fn main() {
     App::new()
+        // FrameTimeDiagnosticsPlugin tracks performance metrics like FPS
         .add_plugins((DefaultPlugins, FrameTimeDiagnosticsPlugin::default()))
         .add_systems(Startup, setup)
+        // Two update systems - one for FPS display, one for color animation
         .add_systems(Update, (text_update_system, text_color_system))
         .run();
 }
+
+// Marker components are like name tags - they help us find specific entities
+// Without these, we'd have to search through ALL text components!
 
 // Marker struct to help identify the FPS UI component, since there may be many Text components
 #[derive(Component)]
@@ -28,55 +37,59 @@ struct AnimatedText;
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // UI camera
     commands.spawn(Camera2d);
-    // Text with one section
+    
+    // ANIMATED TEXT - Bottom right corner
+    // This text will change color over time
     commands.spawn((
-        // Accepts a `String` or any type that converts into a `String`, such as `&str`
+        // Text accepts strings - \n creates line breaks!
         Text::new("hello\nbevy!"),
         TextFont {
-            // This font is loaded and will be used instead of the default font.
+            // Load a custom font - fonts are assets just like images
             font: asset_server.load("fonts/FiraSans-Bold.ttf"),
-            font_size: 67.0,
+            font_size: 67.0, // Nice and big!
             ..default()
         },
-        TextShadow::default(),
-        // Set the justification of the Text
+        TextShadow::default(), // Adds depth with a subtle shadow
+        // Text alignment - like word processor settings
         TextLayout::new_with_justify(JustifyText::Center),
-        // Set the style of the Node itself.
+        // Position the text using absolute positioning
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(5.0),
-            right: Val::Px(5.0),
+            bottom: Val::Px(5.0), // 5 pixels from bottom
+            right: Val::Px(5.0),  // 5 pixels from right
             ..default()
         },
-        AnimatedText,
+        AnimatedText, // Our marker component
     ));
 
-    // Text with multiple sections
+    // FPS COUNTER - Top left corner (default position)
+    // This demonstrates text with multiple sections (spans)
     commands
         .spawn((
-            // Create a Text with multiple child spans.
+            // Parent text starts with "FPS: "
             Text::new("FPS: "),
             TextFont {
-                // This font is loaded and will be used instead of the default font.
                 font: asset_server.load("fonts/FiraSans-Bold.ttf"),
                 font_size: 42.0,
                 ..default()
             },
         ))
         .with_child((
-            TextSpan::default(),
+            // Child span will hold the actual FPS number
+            TextSpan::default(), // Empty for now - we'll update it!
+            // Conditional compilation - different behavior based on features
             if cfg!(feature = "default_font") {
                 (
                     TextFont {
                         font_size: 33.0,
-                        // If no font is specified, the default font (a minimal subset of FiraMono) will be used.
+                        // Uses built-in font if available
                         ..default()
                     },
-                    TextColor(GOLD.into()),
+                    TextColor(GOLD.into()), // Golden color for the number
                 )
             } else {
                 (
-                    // "default_font" feature is unavailable, load a font to use instead.
+                    // Fallback - load a specific font
                     TextFont {
                         font: asset_server.load("fonts/FiraMono-Medium.ttf"),
                         font_size: 33.0,
@@ -85,7 +98,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                     TextColor(GOLD.into()),
                 )
             },
-            FpsText,
+            FpsText, // Marker so we can find this span later
         ));
 
     #[cfg(feature = "default_font")]
@@ -117,29 +130,47 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     ));
 }
 
+// This system animates text color using sine waves
+// Each color channel oscillates at a different frequency - like RGB disco lights!
 fn text_color_system(time: Res<Time>, mut query: Query<&mut TextColor, With<AnimatedText>>) {
     for mut text_color in &mut query {
         let seconds = time.elapsed_secs();
 
-        // Update the color of the ColorText span.
+        // Create smooth color transitions using sine waves
+        // sin() gives us values from -1 to 1
+        // We transform this to 0 to 1 range: (sin(x) + 1) / 2
         text_color.0 = Color::srgb(
-            ops::sin(1.25 * seconds) / 2.0 + 0.5,
-            ops::sin(0.75 * seconds) / 2.0 + 0.5,
-            ops::sin(0.50 * seconds) / 2.0 + 0.5,
+            ops::sin(1.25 * seconds) / 2.0 + 0.5, // Red channel - fastest
+            ops::sin(0.75 * seconds) / 2.0 + 0.5, // Green channel - medium
+            ops::sin(0.50 * seconds) / 2.0 + 0.5, // Blue channel - slowest
         );
+        // Different frequencies create a complex, ever-changing color pattern
+        // It's like mixing three different wave generators!
     }
 }
 
+// This system updates the FPS counter text
 fn text_update_system(
+    // DiagnosticsStore contains performance metrics
     diagnostics: Res<DiagnosticsStore>,
+    // Find only the TextSpan entities with FpsText marker
     mut query: Query<&mut TextSpan, With<FpsText>>,
 ) {
     for mut span in &mut query {
+        // Try to get FPS diagnostic data
         if let Some(fps) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS) {
+            // Use smoothed value to avoid jittery display
             if let Some(value) = fps.smoothed() {
-                // Update the value of the second section
-                **span = format!("{value:.2}");
+                // Update the span's text content
+                // **span dereferences twice: Mut<TextSpan> -> TextSpan -> String
+                **span = format!("{value:.2}"); // .2 = two decimal places
             }
         }
     }
+    
+    // This pattern shows reactive UI:
+    // - Data changes (FPS updates)
+    // - System detects change
+    // - UI automatically updates
+    // No manual refresh needed!
 }

@@ -1,5 +1,27 @@
 //! Demonstrates the clearcoat PBR feature.
 //!
+//! 🌟 The Art of Glossy Finishes: Understanding Clearcoat
+//!
+//! Have you ever admired the deep, lustrous shine of a new car? That glossy layer
+//! isn't the paint itself - it's a transparent coating on top! Clearcoat in 3D
+//! graphics simulates this effect: a thin, transparent layer over your material
+//! that adds depth and realism to surfaces. Think of it as digital varnish!
+//!
+//! 🎨 What You'll See:
+//! - Car paint sphere: Shiny blue metallic with glossy clearcoat
+//! - Glass bubble: Transparent sphere with protective coating
+//! - Golf ball: Dimpled surface with scratched varnish
+//! - Scratched gold: Metallic gold with worn clearcoat showing scratches
+//!
+//! 🎮 Controls:
+//! - `Space`: Toggle between point light and directional light
+//!
+//! 🔑 Key Concepts:
+//! - Clearcoat Layer: A separate transparent material layer
+//! - Multi-layer Materials: Base layer + clearcoat = complex surfaces
+//! - Normal Maps: Can be applied to both base and clearcoat layers
+//! - Real-world Applications: Car paint, lacquered wood, phone screens
+//!
 //! Clearcoat is a separate material layer that represents a thin translucent
 //! layer over a material. Examples include (from the Filament spec [1]) car paint,
 //! soda cans, and lacquered wood.
@@ -46,8 +68,7 @@ enum LightMode {
 #[derive(Component)]
 struct ExampleSphere;
 
-/// Entry point.
-pub fn main() {
+fn main() {
     App::new()
         .init_resource::<LightMode>()
         .add_plugins(DefaultPlugins)
@@ -58,7 +79,7 @@ pub fn main() {
         .run();
 }
 
-/// Initializes the scene.
+// 🏗️ Scene Setup: Creating Our Clearcoat Gallery
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -66,7 +87,10 @@ fn setup(
     asset_server: Res<AssetServer>,
     light_mode: Res<LightMode>,
 ) {
+    // 🌐 Create our sphere mesh once and reuse it
     let sphere = create_sphere_mesh(&mut meshes);
+
+    // 🎨 Spawn our four example spheres
     spawn_car_paint_sphere(&mut commands, &mut materials, &asset_server, &sphere);
     spawn_coated_glass_bubble_sphere(&mut commands, &mut materials, &sphere);
     spawn_golf_ball(&mut commands, &asset_server);
@@ -77,11 +101,13 @@ fn setup(
     spawn_text(&mut commands, &light_mode);
 }
 
-/// Generates a sphere.
+// 🌐 Generate Sphere Mesh with Tangents
+//
+// Tangents are crucial for normal mapping - they define the "grain" direction
+// of the surface, allowing normal maps to create believable surface details
 fn create_sphere_mesh(meshes: &mut Assets<Mesh>) -> Handle<Mesh> {
-    // We're going to use normal maps, so make sure we've generated tangents, or
-    // else the normal maps won't show up.
-
+    // 📐 We MUST generate tangents for normal maps to work correctly!
+    // Without tangents, the GPU won't know how to interpret the normal map
     let mut sphere_mesh = Sphere::new(1.0).mesh().build();
     sphere_mesh
         .generate_tangents()
@@ -89,7 +115,10 @@ fn create_sphere_mesh(meshes: &mut Assets<Mesh>) -> Handle<Mesh> {
     meshes.add(sphere_mesh)
 }
 
-/// Spawn a regular object with a clearcoat layer. This looks like car paint.
+// 🚗 Car Paint Sphere: Classic Clearcoat Application
+//
+// This demonstrates the most common use of clearcoat - automotive paint.
+// The blue metallic base is protected by a glossy transparent layer.
 fn spawn_car_paint_sphere(
     commands: &mut Commands,
     materials: &mut Assets<StandardMaterial>,
@@ -100,15 +129,20 @@ fn spawn_car_paint_sphere(
         .spawn((
             Mesh3d(sphere.clone()),
             MeshMaterial3d(materials.add(StandardMaterial {
-                clearcoat: 1.0,
-                clearcoat_perceptual_roughness: 0.1,
+                // 🌟 Clearcoat Settings
+                clearcoat: 1.0,                      // Full strength clearcoat
+                clearcoat_perceptual_roughness: 0.1, // Very smooth, glossy finish
+
+                // 🎨 Base Layer: Blue Metallic Paint
+                metallic: 0.9,             // Highly metallic
+                perceptual_roughness: 0.5, // Somewhat rough base
+                base_color: BLUE.into(),
+
+                // 🗺️ Normal map adds orange peel texture (common in car paint)
                 normal_map_texture: Some(asset_server.load_with_settings(
                     "textures/BlueNoise-Normal.png",
                     |settings: &mut ImageLoaderSettings| settings.is_srgb = false,
                 )),
-                metallic: 0.9,
-                perceptual_roughness: 0.5,
-                base_color: BLUE.into(),
                 ..default()
             })),
             Transform::from_xyz(-1.0, 1.0, 0.0).with_scale(Vec3::splat(SPHERE_SCALE)),
@@ -116,7 +150,10 @@ fn spawn_car_paint_sphere(
         .insert(ExampleSphere);
 }
 
-/// Spawn a semitransparent object with a clearcoat layer.
+// 🫧 Glass Bubble: Clearcoat on Transparent Materials
+//
+// Shows that clearcoat works with transparency too! Like a soap bubble
+// with an extra protective film.
 fn spawn_coated_glass_bubble_sphere(
     commands: &mut Commands,
     materials: &mut Assets<StandardMaterial>,
@@ -126,12 +163,15 @@ fn spawn_coated_glass_bubble_sphere(
         .spawn((
             Mesh3d(sphere.clone()),
             MeshMaterial3d(materials.add(StandardMaterial {
+                // 🌟 Clearcoat on transparent material
                 clearcoat: 1.0,
                 clearcoat_perceptual_roughness: 0.1,
+
+                // 🫧 Base Layer: Semi-transparent glass
                 metallic: 0.5,
-                perceptual_roughness: 0.1,
-                base_color: Color::srgba(0.9, 0.9, 0.9, 0.3),
-                alpha_mode: AlphaMode::Blend,
+                perceptual_roughness: 0.1, // Smooth glass
+                base_color: Color::srgba(0.9, 0.9, 0.9, 0.3), // 30% opacity
+                alpha_mode: AlphaMode::Blend, // Enable transparency
                 ..default()
             })),
             Transform::from_xyz(-1.0, -1.0, 0.0).with_scale(Vec3::splat(SPHERE_SCALE)),
@@ -139,11 +179,11 @@ fn spawn_coated_glass_bubble_sphere(
         .insert(ExampleSphere);
 }
 
-/// Spawns an object with both a clearcoat normal map (a scratched varnish) and
-/// a main layer normal map (the golf ball pattern).
-///
-/// This object is in glTF format, using the `KHR_materials_clearcoat`
-/// extension.
+// ⛳ Golf Ball: Multiple Normal Maps
+//
+// This showcases a complex scenario: dimples on the ball (base normal map)
+// with scratches on the varnish (clearcoat normal map). The glTF file
+// uses the KHR_materials_clearcoat extension.
 fn spawn_golf_ball(commands: &mut Commands, asset_server: &AssetServer) {
     commands.spawn((
         SceneRoot(
@@ -154,8 +194,10 @@ fn spawn_golf_ball(commands: &mut Commands, asset_server: &AssetServer) {
     ));
 }
 
-/// Spawns an object with only a clearcoat normal map (a scratch pattern) and no
-/// main layer normal map.
+// 🏆 Scratched Gold: Clearcoat Normal Maps
+//
+// Demonstrates how scratches in the clearcoat layer don't affect the
+// underlying material - just like real scratched varnish!
 fn spawn_scratched_gold_ball(
     commands: &mut Commands,
     materials: &mut Assets<StandardMaterial>,
@@ -166,14 +208,19 @@ fn spawn_scratched_gold_ball(
         .spawn((
             Mesh3d(sphere.clone()),
             MeshMaterial3d(materials.add(StandardMaterial {
+                // 🌟 Scratched clearcoat
                 clearcoat: 1.0,
-                clearcoat_perceptual_roughness: 0.3,
+                clearcoat_perceptual_roughness: 0.3, // Rougher due to scratches
+
+                // 🗺️ Clearcoat normal map shows scratch pattern
                 clearcoat_normal_texture: Some(asset_server.load_with_settings(
                     "textures/ScratchedGold-Normal.png",
                     |settings: &mut ImageLoaderSettings| settings.is_srgb = false,
                 )),
+
+                // 🏆 Base Layer: Smooth gold metal
                 metallic: 0.9,
-                perceptual_roughness: 0.1,
+                perceptual_roughness: 0.1, // Very smooth gold
                 base_color: GOLD.into(),
                 ..default()
             })),
@@ -182,29 +229,31 @@ fn spawn_scratched_gold_ball(
         .insert(ExampleSphere);
 }
 
-/// Spawns a light.
+// 💡 Dynamic Lighting
 fn spawn_light(commands: &mut Commands) {
     commands.spawn(create_point_light());
 }
 
-/// Spawns a camera with associated skybox and environment map.
+// 📷 Camera with Environment
 fn spawn_camera(commands: &mut Commands, asset_server: &AssetServer) {
     commands
         .spawn((
             Camera3d::default(),
-            Hdr,
+            Hdr, // High Dynamic Range for realistic lighting
             Projection::Perspective(PerspectiveProjection {
-                fov: 27.0 / 180.0 * PI,
+                fov: 27.0 / 180.0 * PI, // Narrower FOV for less distortion
                 ..default()
             }),
             Transform::from_xyz(0.0, 0.0, 10.0),
-            AcesFitted,
+            AcesFitted, // Filmic tone mapping
         ))
+        // 🌍 Skybox for reflections
         .insert(Skybox {
             brightness: 5000.0,
             image: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
             ..default()
         })
+        // 🌞 Environment lighting
         .insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("environment_maps/pisa_diffuse_rgb9e5_zstd.ktx2"),
             specular_map: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
@@ -213,7 +262,7 @@ fn spawn_camera(commands: &mut Commands, asset_server: &AssetServer) {
         });
 }
 
-/// Spawns the help text.
+// 📝 UI Text
 fn spawn_text(commands: &mut Commands, light_mode: &LightMode) {
     commands.spawn((
         light_mode.create_help_text(),
@@ -226,13 +275,17 @@ fn spawn_text(commands: &mut Commands, light_mode: &LightMode) {
     ));
 }
 
-/// Moves the light around.
+// 🎬 Light Animation System
+//
+// Moves the light in a complex 3D pattern to showcase how clearcoat
+// responds to changing light angles
 fn animate_light(
     mut lights: Query<&mut Transform, Or<(With<PointLight>, With<DirectionalLight>)>>,
     time: Res<Time>,
 ) {
     let now = time.elapsed_secs();
     for mut transform in lights.iter_mut() {
+        // 🌀 Complex orbital motion
         transform.translation = vec3(
             ops::sin(now * 1.4),
             ops::cos(now * 1.0),
@@ -242,7 +295,10 @@ fn animate_light(
     }
 }
 
-/// Rotates the spheres.
+// 🔄 Sphere Rotation System
+//
+// Slowly rotates spheres to show how clearcoat interacts with light
+// from different angles
 fn animate_spheres(mut spheres: Query<&mut Transform, With<ExampleSphere>>, time: Res<Time>) {
     let now = time.elapsed_secs();
     for mut transform in spheres.iter_mut() {
@@ -250,8 +306,7 @@ fn animate_spheres(mut spheres: Query<&mut Transform, With<ExampleSphere>>, time
     }
 }
 
-/// Handles the user pressing Space to change the type of light from point to
-/// directional and vice versa.
+// 🎮 Input Handler: Toggle Light Type
 fn handle_input(
     mut commands: Commands,
     mut light_query: Query<Entity, Or<(With<PointLight>, With<DirectionalLight>)>>,
@@ -282,14 +337,14 @@ fn handle_input(
     }
 }
 
-/// Updates the help text at the bottom of the screen.
+// 📝 Update Help Text
 fn update_help_text(mut text_query: Query<&mut Text>, light_mode: Res<LightMode>) {
     for mut text in text_query.iter_mut() {
         *text = light_mode.create_help_text();
     }
 }
 
-/// Creates or recreates the moving point light.
+// 💡 Point Light Configuration
 fn create_point_light() -> PointLight {
     PointLight {
         color: WHITE.into(),
@@ -298,7 +353,7 @@ fn create_point_light() -> PointLight {
     }
 }
 
-/// Creates or recreates the moving directional light.
+// ☀️ Directional Light Configuration
 fn create_directional_light() -> DirectionalLight {
     DirectionalLight {
         color: WHITE.into(),
@@ -308,7 +363,6 @@ fn create_directional_light() -> DirectionalLight {
 }
 
 impl LightMode {
-    /// Creates the help text at the bottom of the screen.
     fn create_help_text(&self) -> Text {
         let help_text = match *self {
             LightMode::Point => "Press Space to switch to a directional light",
@@ -318,3 +372,33 @@ impl LightMode {
         Text::new(help_text)
     }
 }
+
+// 🎓 Deep Dive: The Physics of Clearcoat
+//
+// Clearcoat simulates a thin dielectric (non-metallic) layer over a material.
+// In the real world, this layer:
+//
+// 1. **Adds Fresnel Reflections**: More reflective at grazing angles
+// 2. **Has Its Own Roughness**: Can be smooth even if base is rough
+// 3. **Can Have Normal Maps**: Scratches that don't affect the base
+// 4. **Is Always Dielectric**: Even over metals (like car paint)
+//
+// The rendering equation treats it as two separate BRDF layers:
+// - Base layer: Your standard PBR material
+// - Clearcoat layer: Always dielectric, typically IOR ~1.5
+//
+// Light interacts with both layers:
+// 1. Some light reflects off the clearcoat
+// 2. Remaining light passes through to the base layer
+// 3. Base layer reflection comes back through clearcoat
+
+// 💡 Practical Applications:
+//
+// **Automotive**: Car paint, headlights, trim pieces
+// **Consumer Products**: Phones, laptops, glossy plastics
+// **Architecture**: Lacquered wood, polished floors, varnished surfaces
+// **Food/Beverage**: Candy coating, wet surfaces, packaging
+//
+// Performance Note: Clearcoat adds a second specular lobe calculation,
+// roughly 20-30% more expensive than standard materials.
+

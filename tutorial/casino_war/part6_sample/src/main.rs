@@ -323,6 +323,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .init_state::<GamePhase>()
+        .enable_state_scoped_entities::<GamePhase>()
         .insert_resource(GameState::default())
         .insert_resource(PlayerStats::default())
         .add_systems(Startup, setup_camera)
@@ -417,6 +418,7 @@ fn setup_main_menu(mut commands: Commands, mut game_state: ResMut<GameState>) {
         // Play button
         parent.spawn((
             Button,
+            Interaction::None,
             PlayButton,
             McLarenButton {
                 primary: true,

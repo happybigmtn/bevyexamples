@@ -1,151 +1,254 @@
-//! This example shows how to create a node with a shadow and adjust its settings interactively.
+//! # UI Box Shadow Example
+//! 
+//! This example demonstrates how to create and customize CSS-style box shadows in Bevy 0.16 UI.
+//! 
+//! ## What You'll Learn
+//! - How to create box shadows using `BoxShadow` and `ShadowStyle`
+//! - Understanding shadow properties: offset, blur, spread, color
+//! - How to control shadow rendering quality with `BoxShadowSamples`
+//! - Creating interactive UI controls with buttons and real-time updates
+//! - Resource-driven UI systems for managing application state
+//! - Button interaction handling with press, hold, and repeat behavior
+//! - Dynamic UI updates using resource change detection
+//! 
+//! ## Key Concepts
+//! - **Box Shadow**: A visual effect that creates the illusion of depth by casting shadows
+//! - **ShadowStyle**: Defines individual shadow properties (color, position, blur, spread)
+//! - **Shadow Offset**: How far the shadow is displaced from the element (x, y)
+//! - **Shadow Blur**: How soft/diffused the shadow edges are
+//! - **Shadow Spread**: How much the shadow expands beyond the element's size
+//! - **Shadow Samples**: Quality setting for shadow rendering (higher = smoother but slower)
+//! - **Interactive UI**: Buttons that respond to user input and update visual properties
+//! 
+//! ## Controls
+//! - Use the control panel to adjust shadow properties in real-time
+//! - Hold buttons for continuous value changes
+//! - Try different shapes to see how shadows adapt to border radius
+//! - Experiment with multiple shadow layers for creative effects
 
+// Essential imports for creating an interactive shadow demo
 use bevy::{
-    color::palettes::css::*, prelude::*, time::Time, window::RequestRedraw, winit::WinitSettings,
+    color::palettes::css::*,    // Pre-defined color constants
+    prelude::*,                 // Core Bevy types and traits
+    time::Time,                 // For button repeat timing
+    window::RequestRedraw,      // For triggering redraws during interactions
+    winit::WinitSettings,       // For optimizing desktop app performance
 };
 
-const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
-const HOVERED_BUTTON: Color = Color::srgb(0.25, 0.25, 0.25);
-const PRESSED_BUTTON: Color = Color::srgb(0.35, 0.75, 0.35);
+// Button color constants for different interaction states
+// These create a cohesive visual feedback system for user interactions
+const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);  // Dark gray when idle
+const HOVERED_BUTTON: Color = Color::srgb(0.25, 0.25, 0.25); // Lighter gray when hovered
+const PRESSED_BUTTON: Color = Color::srgb(0.35, 0.75, 0.35); // Green when pressed
 
+// Default settings for the shape selector
+// Using a struct here allows us to easily reset to defaults
 const SHAPE_DEFAULT_SETTINGS: ShapeSettings = ShapeSettings { index: 0 };
 
+// Default shadow configuration values
+// These provide sensible starting values that demonstrate shadow effects clearly
 const SHADOW_DEFAULT_SETTINGS: ShadowSettings = ShadowSettings {
-    x_offset: 20.0,
-    y_offset: 20.0,
-    blur: 10.0,
-    spread: 15.0,
-    count: 1,
-    samples: 6,
+    x_offset: 20.0,  // Shadow displaced 20px right
+    y_offset: 20.0,  // Shadow displaced 20px down
+    blur: 10.0,      // Moderate blur for soft edges
+    spread: 15.0,    // Shadow extends 15px beyond element
+    count: 1,        // Single shadow layer
+    samples: 6,      // Good quality/performance balance
 };
 
+// Array of shape configurations to demonstrate how shadows work with different geometries
+// Each entry contains a display name and a closure that configures the node and border radius
+// This pattern allows us to define complex configurations in a data-driven way
 const SHAPES: &[(&str, fn(&mut Node, &mut BorderRadius))] = &[
+    // Shape 1: Square with sharp corners - shows basic shadow behavior
     ("1", |node, radius| {
         node.width = Val::Px(164.);
         node.height = Val::Px(164.);
-        *radius = BorderRadius::ZERO;
+        *radius = BorderRadius::ZERO;  // No rounding - sharp rectangular shadow
     }),
+    
+    // Shape 2: Square with moderate rounding - shows how shadows follow border radius
     ("2", |node, radius| {
         node.width = Val::Px(164.);
         node.height = Val::Px(164.);
-        *radius = BorderRadius::all(Val::Px(41.));
+        *radius = BorderRadius::all(Val::Px(41.));  // Rounded corners affect shadow shape
     }),
+    
+    // Shape 3: Perfect circle - demonstrates circular shadow casting
     ("3", |node, radius| {
         node.width = Val::Px(164.);
         node.height = Val::Px(164.);
-        *radius = BorderRadius::MAX;
+        *radius = BorderRadius::MAX;  // Maximum radius creates perfect circle
     }),
+    
+    // Shape 4: Wide rectangle - shows shadow behavior on non-square elements
     ("4", |node, radius| {
-        node.width = Val::Px(240.);
+        node.width = Val::Px(240.);   // Wide aspect ratio
         node.height = Val::Px(80.);
-        *radius = BorderRadius::all(Val::Px(32.));
+        *radius = BorderRadius::all(Val::Px(32.));  // Moderate rounding
     }),
+    
+    // Shape 5: Tall rectangle - demonstrates vertical shadow extension
     ("5", |node, radius| {
-        node.width = Val::Px(80.);
-        node.height = Val::Px(240.);
-        *radius = BorderRadius::all(Val::Px(32.));
+        node.width = Val::Px(80.);    // Narrow width
+        node.height = Val::Px(240.);  // Tall height
+        *radius = BorderRadius::all(Val::Px(32.));  // Consistent rounding
     }),
 ];
 
+// Resource to track which shape is currently selected
+// Resources in Bevy are global application state that can be accessed by any system
+// The Default trait allows us to easily create instances with default values
 #[derive(Resource, Default)]
 struct ShapeSettings {
-    index: usize,
+    index: usize,  // Index into the SHAPES array
 }
 
+// Resource containing all shadow configuration parameters
+// This centralizes shadow state and makes it easy to save/load configurations
 #[derive(Resource, Default)]
 struct ShadowSettings {
-    x_offset: f32,
-    y_offset: f32,
-    blur: f32,
-    spread: f32,
-    count: usize,
-    samples: u32,
+    x_offset: f32,  // Horizontal shadow displacement (-∞ to +∞)
+    y_offset: f32,  // Vertical shadow displacement (-∞ to +∞)
+    blur: f32,      // Shadow blur radius (0 = sharp, higher = softer)
+    spread: f32,    // Shadow size expansion (-∞ to +∞)
+    count: usize,   // Number of shadow layers (1-3 in this example)
+    samples: u32,   // Rendering quality (higher = smoother but slower)
 }
 
+// Component marker to identify the node that displays shadows
+// This allows systems to find and update the specific node that needs shadow changes
 #[derive(Component)]
 struct ShadowNode;
 
+// Component enum to identify different types of interactive buttons
+// Using an enum allows us to have one button system that handles all button types
+// PartialEq and Clone are needed for comparison and copying in our systems
 #[derive(Component, PartialEq, Clone, Copy)]
 enum SettingsButton {
-    XOffsetInc,
-    XOffsetDec,
-    YOffsetInc,
-    YOffsetDec,
-    BlurInc,
-    BlurDec,
-    SpreadInc,
-    SpreadDec,
-    CountInc,
-    CountDec,
-    ShapePrev,
-    ShapeNext,
-    Reset,
-    SamplesInc,
-    SamplesDec,
+    // Shadow offset controls - move shadow position
+    XOffsetInc,    // Increase horizontal offset (move shadow right)
+    XOffsetDec,    // Decrease horizontal offset (move shadow left)
+    YOffsetInc,    // Increase vertical offset (move shadow down)
+    YOffsetDec,    // Decrease vertical offset (move shadow up)
+    
+    // Shadow blur controls - change edge softness
+    BlurInc,       // Increase blur (softer edges)
+    BlurDec,       // Decrease blur (sharper edges)
+    
+    // Shadow spread controls - change shadow size
+    SpreadInc,     // Increase spread (larger shadow)
+    SpreadDec,     // Decrease spread (smaller shadow)
+    
+    // Shadow count controls - number of shadow layers
+    CountInc,      // Add another shadow layer
+    CountDec,      // Remove a shadow layer
+    
+    // Shape selection controls
+    ShapePrev,     // Previous shape in the array
+    ShapeNext,     // Next shape in the array
+    
+    // Utility controls
+    Reset,         // Reset all settings to defaults
+    
+    // Quality controls
+    SamplesInc,    // Increase rendering quality
+    SamplesDec,    // Decrease rendering quality
 }
 
+// Component enum to categorize different types of settings for UI display
+// This helps us organize the control panel and update the correct value displays
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 enum SettingType {
-    XOffset,
-    YOffset,
-    Blur,
-    Spread,
-    Count,
-    Shape,
-    Samples,
+    XOffset,  // Horizontal shadow displacement
+    YOffset,  // Vertical shadow displacement
+    Blur,     // Shadow edge softness
+    Spread,   // Shadow size expansion
+    Count,    // Number of shadow layers
+    Shape,    // Selected shape configuration
+    Samples,  // Rendering quality level
 }
+
 impl SettingType {
+    // Helper method to get human-readable labels for the UI
+    // This creates consistent labeling throughout the interface
     fn label(&self) -> &str {
         match self {
-            SettingType::XOffset => "X Offset",
-            SettingType::YOffset => "Y Offset",
-            SettingType::Blur => "Blur",
-            SettingType::Spread => "Spread",
-            SettingType::Count => "Count",
-            SettingType::Shape => "Shape",
-            SettingType::Samples => "Samples",
+            SettingType::XOffset => "X Offset",   // Horizontal positioning
+            SettingType::YOffset => "Y Offset",   // Vertical positioning  
+            SettingType::Blur => "Blur",          // Edge softness
+            SettingType::Spread => "Spread",      // Size expansion
+            SettingType::Count => "Count",        // Layer quantity
+            SettingType::Shape => "Shape",        // Geometry selection
+            SettingType::Samples => "Samples",    // Quality setting
         }
     }
 }
 
+// Resource to track button press-and-hold behavior for continuous value changes
+// This enables users to hold buttons for rapid adjustments instead of clicking repeatedly
 #[derive(Resource, Default)]
 struct HeldButton {
-    button: Option<SettingsButton>,
-    pressed_at: Option<f64>,
-    last_repeat: Option<f64>,
+    button: Option<SettingsButton>,  // Which button is currently being held (if any)
+    pressed_at: Option<f64>,         // When the button was first pressed (for initial delay)
+    last_repeat: Option<f64>,        // When the last repeat action occurred (for repeat rate)
 }
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins)  // Essential Bevy systems for windowing, rendering, input, etc.
+        
+        // Configure for desktop app performance - only redraws when needed
         .insert_resource(WinitSettings::desktop_app())
-        .insert_resource(SHADOW_DEFAULT_SETTINGS)
-        .insert_resource(SHAPE_DEFAULT_SETTINGS)
-        .insert_resource(HeldButton::default())
+        
+        // Initialize our application state resources with default values
+        .insert_resource(SHADOW_DEFAULT_SETTINGS)  // Shadow configuration
+        .insert_resource(SHAPE_DEFAULT_SETTINGS)   // Shape selection
+        .insert_resource(HeldButton::default())    // Button hold tracking
+        
+        // Run setup once when the application starts
         .add_systems(Startup, setup)
+        
+        // Update systems that run every frame
         .add_systems(
             Update,
             (
+                // Handle button press events and update resources
                 button_system,
+                
+                // Update button colors based on interaction state
                 button_color_system,
+                
+                // Update shape only when shape settings change
+                // run_if() is a performance optimization - only runs when needed
                 update_shape.run_if(resource_changed::<ShapeSettings>),
+                
+                // Update shadow styling when shadow settings change
                 update_shadow.run_if(resource_changed::<ShadowSettings>),
+                
+                // Update shadow rendering quality when settings change
                 update_shadow_samples.run_if(resource_changed::<ShadowSettings>),
+                
+                // Handle continuous button presses (hold-to-repeat)
                 button_repeat_system,
             ),
         )
-        .run();
+        .run(); // Start the main application loop
 }
 
 // --- UI Setup ---
+// This function creates the entire user interface including the shadow demo and control panel
 fn setup(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    shadow: Res<ShadowSettings>,
-    shape: Res<ShapeSettings>,
+    mut commands: Commands,    // For spawning entities
+    asset_server: Res<AssetServer>,  // For loading fonts
+    shadow: Res<ShadowSettings>,     // Current shadow configuration
+    shape: Res<ShapeSettings>,       // Current shape selection
 ) {
+    // Spawn camera with shadow quality setting
+    // BoxShadowSamples controls the rendering quality of all shadows in the scene
     commands.spawn((Camera2d, BoxShadowSamples(shadow.samples)));
-    // Spawn shape node
+    
+    // Create the main demonstration area showing the shadowed shape
     commands
         .spawn((
             Node {
@@ -174,12 +277,14 @@ fn setup(
                 BorderColor::all(WHITE.into()),
                 radius,
                 BackgroundColor(Color::srgb(0.21, 0.21, 0.21)),
+                // BoxShadow component applies shadow effects to this UI node
+                // It takes a Vec<ShadowStyle> allowing multiple shadow layers
                 BoxShadow(vec![ShadowStyle {
-                    color: Color::BLACK.with_alpha(0.8),
-                    x_offset: Val::Px(shadow.x_offset),
-                    y_offset: Val::Px(shadow.y_offset),
-                    spread_radius: Val::Px(shadow.spread),
-                    blur_radius: Val::Px(shadow.blur),
+                    color: Color::BLACK.with_alpha(0.8),      // Semi-transparent black
+                    x_offset: Val::Px(shadow.x_offset),       // Horizontal displacement
+                    y_offset: Val::Px(shadow.y_offset),       // Vertical displacement
+                    spread_radius: Val::Px(shadow.spread),    // Size expansion
+                    blur_radius: Val::Px(shadow.blur),        // Edge softness
                 }]),
                 ShadowNode,
             )

@@ -2,6 +2,82 @@
 //!
 //! The animation graph is shown on screen. You can change the weights of the
 //! playing animations by clicking and dragging left or right within the nodes.
+//!
+//! ## Animation Theory: Blend Trees and Graphs
+//!
+//! Animation graphs solve the state machine problem:
+//! - **Blend Nodes**: Mix multiple animations based on weights
+//! - **Clip Nodes**: Individual animation sources
+//! - **Transition Nodes**: Smooth changes between states
+//! - **Additive Nodes**: Layer animations on top of each other
+//!
+//! Blending mathematics:
+//! - Linear blend: result = anim_a * weight_a + anim_b * weight_b
+//! - Normalized blend: weights sum to 1.0 for consistent motion
+//! - Additive blend: result = base + (additive - reference) * weight
+//!
+//! ## Game Feel Context: Dynamic Motion
+//!
+//! Animation blending creates responsive characters:
+//! - **Locomotion**: Blend walk/run based on speed
+//! - **Directional**: Blend forward/left/right for strafing
+//! - **Layered**: Mix upper body aim with lower body movement
+//! - **Emotional**: Blend happy/sad/angry facial expressions
+//!
+//! This example demonstrates:
+//! - Real-time weight adjustment (like a DJ mixing tracks)
+//! - Visual feedback of blend weights
+//! - Three-way blending (idle/walk/run)
+//!
+//! ## Performance Optimization: Graph Evaluation
+//!
+//! Animation graph optimization:
+//! 1. **Lazy Evaluation**: Only compute active branches
+//! 2. **Weight Culling**: Skip near-zero weighted animations
+//! 3. **Pose Caching**: Reuse computed poses
+//! 4. **SIMD Blending**: Vectorize bone transformations
+//! 5. **LOD Graphs**: Simpler graphs for distant characters
+//!
+//! Memory considerations:
+//! - Graph structure is usually small (KB)
+//! - Pose buffers are the main memory cost
+//! - Share graphs between similar characters
+//!
+//! ## Real-World Applications: AAA Animation Systems
+//!
+//! Modern games use complex graphs:
+//! - **Uncharted**: 1000+ node graphs for main character
+//! - **Assassin's Creed**: Contextual graphs for parkour
+//! - **FIFA**: Blend trees for 360° movement
+//! - **God of War**: Layered graphs for combat combos
+//!
+//! Graph types in games:
+//! 1. **State Machines**: Discrete states with transitions
+//! 2. **Blend Trees**: Continuous blending based on parameters
+//! 3. **Layered**: Separate graphs for body parts
+//! 4. **Contextual**: Different graphs for different gameplay
+//!
+//! ## Advanced Techniques: Graph Systems
+//!
+//! 1. **Parametric Blending**: Use gameplay values as weights
+//! 2. **IK Layers**: Apply IK on top of blended result
+//! 3. **Motion Warping**: Adjust animations to match targets
+//! 4. **Pose Matching**: Find best pose from database
+//! 5. **Neural Blending**: ML-based weight calculation
+//!
+//! ## Common Issues and Solutions
+//!
+//! 1. **Blend Artifacts**: Unnatural poses from bad blends
+//!    - Solution: Ensure animations are compatible
+//!
+//! 2. **Performance Spikes**: Complex graphs lag
+//!    - Solution: Profile and optimize hot paths
+//!
+//! 3. **Transition Pops**: Sudden changes when switching
+//!    - Solution: Always blend, never hard switch
+//!
+//! 4. **Synchronization**: Animations at different speeds
+//!    - Solution: Time-warp to match phase
 
 use bevy::{
     color::palettes::{
@@ -66,8 +142,10 @@ static VERTICAL_LINES: [Line; 2] = [
     Line::new(265.88, 34.21, 102.61),
 ];
 
+/// THE ANIMATION STUDIO - Initialize the mixing board demo
 /// Initializes the app.
 fn main() {
+    // PLATFORM-SPECIFIC ARGS - Handle command line arguments
     #[cfg(not(target_arch = "wasm32"))]
     let args: Args = argh::from_env();
     #[cfg(target_arch = "wasm32")]
@@ -81,13 +159,16 @@ fn main() {
             }),
             ..default()
         }))
+        // INITIALIZATION PHASE - Set up the mixing board and scene
         .add_systems(Startup, (setup_assets, setup_scene, setup_ui))
         .add_systems(Update, init_animations)
+        // INTERACTIVE BLENDING CHAIN - Handle user input and update the mix
         .add_systems(
             Update,
-            (handle_weight_drag, update_ui, sync_weights).chain(),
+            (handle_weight_drag, update_ui, sync_weights).chain(),  // Run in order - input -> UI -> animation
         )
         .insert_resource(args)
+        // LIGHTING SETUP - Illuminate our animated fox
         .insert_resource(AmbientLight {
             color: WHITE.into(),
             brightness: 100.0,
@@ -395,19 +476,35 @@ fn init_animations(
 
 /// Read cursor position relative to clip nodes, allowing the user to change weights
 /// when dragging the node UI widgets.
+///
+/// ## UI/UX Design: Direct Manipulation
+/// This implements a "mixing board" interface where:
+/// - Dragging left = 0% weight (animation off)
+/// - Dragging right = 100% weight (animation fully on)
+/// - Visual feedback shows current weight as green bar
+///
+/// ## Rust Pattern: Query Filtering
+/// The query combines multiple components to find interactive nodes:
+/// - Interaction: Is the mouse interacting with this?
+/// - RelativeCursorPosition: Where is the cursor within the node?
+/// - ClipNode: Which animation does this control?
 fn handle_weight_drag(
     mut interaction_query: Query<(&Interaction, &RelativeCursorPosition, &ClipNode)>,
     mut animation_weights_query: Query<&mut ExampleAnimationWeights>,
 ) {
     for (interaction, relative_cursor, clip_node) in &mut interaction_query {
+        // Only process when mouse is pressed (dragging)
         if !matches!(*interaction, Interaction::Pressed) {
             continue;
         }
 
+        // Get normalized position (0.0 to 1.0) within the UI node
         let Some(pos) = relative_cursor.normalized else {
             continue;
         };
 
+        // Update the weight based on horizontal position
+        // pos.x directly maps to weight: leftmost = 0.0, rightmost = 1.0
         for mut animation_weights in animation_weights_query.iter_mut() {
             animation_weights.weights[clip_node.index] = pos.x.clamp(0., 1.);
         }
@@ -445,6 +542,21 @@ fn update_ui(
 
 /// Takes the weights that were set in the UI and assigns them to the actual
 /// playing animation.
+///
+/// ## Animation Blending Theory
+/// This is where the magic happens - UI weights become animation blend weights!
+/// The AnimationPlayer uses these weights to:
+/// 1. Sample each animation at current time
+/// 2. Multiply each pose by its weight
+/// 3. Sum all weighted poses
+/// 4. Normalize if weights don't sum to 1.0
+///
+/// ## Performance Consideration
+/// This runs every frame when weights change
+/// In production, consider:
+/// - Smoothing weight changes over time
+/// - Caching blend results
+/// - LOD system for distant characters
 fn sync_weights(mut query: Query<(&mut AnimationPlayer, &ExampleAnimationWeights)>) {
     for (mut animation_player, animation_weights) in query.iter_mut() {
         for (&animation_node_index, &animation_weight) in CLIP_NODE_INDICES

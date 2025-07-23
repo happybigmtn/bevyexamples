@@ -1,11 +1,32 @@
 //! Demonstrates different sub view effects.
 //!
+//! 🔍 The Magic Window: Understanding Camera Sub Views
+//!
+//! Imagine you have a massive painting, but you can only look at it through
+//! different sized windows that slide around. That's what camera sub views do!
+//! They let you show just a portion of what a camera sees, creating effects
+//! like security camera monitors, magnifying glasses, or split-screen views.
+//!
+//! 🎯 What You'll See:
+//! - 8 different camera views showing the same 3D scene
+//! - Main views: Full perspective and orthographic cameras
+//! - Stretched views: Showing how aspect ratios affect the image
+//! - Moving views: Sliding windows that pan across the scene
+//! - Control views: Properly aspect-ratio corrected partial views
+//!
+//! 🔑 Key Concepts:
+//! - Sub Views: Showing only part of what a camera sees
+//! - Viewport: Where on screen to display the camera's output
+//! - Aspect Ratios: How stretching occurs when ratios don't match
+//! - Perspective vs Orthographic: Two fundamental ways of seeing 3D
+//!
 //! A sub view is essentially a smaller section of a larger viewport. Some use
 //! cases include:
 //! - Split one image across multiple cameras, for use in a multimonitor setups
 //! - Magnify a section of the image, by rendering a small sub view in another
 //!   camera
 //! - Rapidly change the sub view offset to get a screen shake effect
+
 use bevy::{
     prelude::*,
     render::camera::{ScalingMode, SubCameraView, Viewport},
@@ -19,31 +40,33 @@ fn main() {
         .run();
 }
 
+// 🎬 Marker for cameras that move their sub view
 #[derive(Debug, Component)]
 struct MovingCameraMarker;
 
-/// Set up a simple 3D scene
+// 🏗️ Scene Setup: Creating Our Test Environment
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    // 📷 All cameras will share this viewpoint
     let transform = Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y);
 
-    // Plane
+    // 🌍 Ground Plane
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(5.0, 5.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
     ));
 
-    // Cube
+    // 📦 Test Cube - Our subject
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::default())),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
         Transform::from_xyz(0.0, 0.5, 0.0),
     ));
 
-    // Light
+    // 💡 Lighting
     commands.spawn((
         PointLight {
             shadows_enabled: true,
@@ -52,9 +75,9 @@ fn setup(
         Transform::from_xyz(4.0, 8.0, 4.0),
     ));
 
-    // Main perspective camera:
+    // 🖼️ Camera 1: Main Perspective View
     //
-    // The main perspective image to use as a comparison for the sub views.
+    // This is our reference image - shows the full scene as a normal camera would
     commands.spawn((
         Camera3d::default(),
         Camera::default(),
@@ -62,47 +85,41 @@ fn setup(
         transform,
     ));
 
-    // Perspective camera right half:
+    // 🔲 Camera 2: Perspective Right Half (Stretched)
     //
-    // For this camera, the projection is perspective, and `size` is half the
-    // width of the `full_size`, while the x value of `offset` is set to half
-    // the value of the full width, causing the right half of the image to be
-    // shown. Since the viewport has an aspect ratio of 1x1 and the sub view has
-    // an aspect ratio of 1x2, the image appears stretched along the horizontal
-    // axis.
+    // Demonstrates what happens when aspect ratios don't match!
+    // The sub view captures only the right half of the image (aspect 1:2)
+    // but displays it in a square viewport (aspect 1:1), causing horizontal stretching
     commands.spawn((
         Camera3d::default(),
         Camera {
             sub_camera_view: Some(SubCameraView {
-                // The values of `full_size` and `size` do not have to be the
-                // exact values of your physical viewport. The important part is
-                // the ratio between them.
+                // 📏 Think of these as "virtual pixels" - the actual values don't matter,
+                // only their ratios do! Here we have a 10x10 "full image"
                 full_size: UVec2::new(10, 10),
-                // The `offset` is also relative to the values in `full_size`
-                // and `size`
+                // 📍 Offset of 5 units right = start from the middle
                 offset: Vec2::new(5.0, 0.0),
+                // 🔍 Size of 5x10 = right half of the image
                 size: UVec2::new(5, 10),
             }),
-            order: 1,
+            order: 1,  // Render order (lower = earlier)
             ..default()
         },
         ExampleViewports::PerspectiveStretched,
         transform,
     ));
 
-    // Perspective camera moving:
+    // 🎬 Camera 3: Perspective Moving View (Magnified)
     //
-    // For this camera, the projection is perspective, and the offset is updated
-    // continuously in 150 units per second in `move_camera_view`. Since the
-    // `full_size` is 500x500, the image should appear to be moving across the
-    // full image once every 3.3 seconds. `size` is a fifth of the size of
-    // `full_size`, so the image will appear zoomed in.
+    // This creates a "magnifying glass" effect that slides across the scene
     commands.spawn((
         Camera3d::default(),
         Camera {
             sub_camera_view: Some(SubCameraView {
+                // 🔍 Large full_size (500x500) with small size (100x100)
+                // means we're zoomed in 5x!
                 full_size: UVec2::new(500, 500),
-                offset: Vec2::ZERO,
+                offset: Vec2::ZERO,  // Updated in move_camera_view
                 size: UVec2::new(100, 100),
             }),
             order: 2,
@@ -110,23 +127,21 @@ fn setup(
         },
         transform,
         ExampleViewports::PerspectiveMoving,
-        MovingCameraMarker,
+        MovingCameraMarker,  // This camera's view will move!
     ));
 
-    // Perspective camera different aspect ratio:
+    // 🎭 Camera 4: Perspective with Correct Aspect Ratio
     //
-    // For this camera, the projection is perspective, and the aspect ratio of
-    // the sub view (2x1) is different to the aspect ratio of the full view
-    // (2x2). The aspect ratio of the sub view matches the aspect ratio of
-    // the viewport and should show an unstretched image of the top half of the
-    // full perspective image.
+    // Shows how to properly display a portion of the image without stretching
     commands.spawn((
         Camera3d::default(),
         Camera {
             sub_camera_view: Some(SubCameraView {
+                // 📐 The sub view (800x400 = 2:1 aspect) matches
+                // the viewport aspect ratio, preventing distortion
                 full_size: UVec2::new(800, 800),
                 offset: Vec2::ZERO,
-                size: UVec2::new(800, 400),
+                size: UVec2::new(800, 400),  // Top half of image
             }),
             order: 3,
             ..default()
@@ -135,12 +150,13 @@ fn setup(
         transform,
     ));
 
-    // Main orthographic camera:
+    // 📐 Camera 5: Main Orthographic View
     //
-    // The main orthographic image to use as a comparison for the sub views.
+    // Orthographic projection has no perspective - like architectural drawings
     commands.spawn((
         Camera3d::default(),
         Projection::from(OrthographicProjection {
+            // 🔧 Fixed vertical height means consistent scale regardless of window size
             scaling_mode: ScalingMode::FixedVertical {
                 viewport_height: 6.0,
             },
@@ -154,12 +170,9 @@ fn setup(
         transform,
     ));
 
-    // Orthographic camera left half:
+    // 🔲 Camera 6: Orthographic Left Half (Stretched)
     //
-    // For this camera, the projection is orthographic, and `size` is half the
-    // width of the `full_size`, causing the left half of the image to be shown.
-    // Since the viewport has an aspect ratio of 1x1 and the sub view has an
-    // aspect ratio of 1x2, the image appears stretched along the horizontal axis.
+    // Same stretching concept as Camera 2, but with orthographic projection
     commands.spawn((
         Camera3d::default(),
         Projection::from(OrthographicProjection {
@@ -172,7 +185,7 @@ fn setup(
             sub_camera_view: Some(SubCameraView {
                 full_size: UVec2::new(2, 2),
                 offset: Vec2::ZERO,
-                size: UVec2::new(1, 2),
+                size: UVec2::new(1, 2),  // Left half
             }),
             order: 5,
             ..default()
@@ -181,13 +194,9 @@ fn setup(
         transform,
     ));
 
-    // Orthographic camera moving:
+    // 🎬 Camera 7: Orthographic Moving View
     //
-    // For this camera, the projection is orthographic, and the offset is
-    // updated continuously in 150 units per second in `move_camera_view`. Since
-    // the `full_size` is 500x500, the image should appear to be moving across
-    // the full image once every 3.3 seconds. `size` is a fifth of the size of
-    // `full_size`, so the image will appear zoomed in.
+    // Sliding window effect with orthographic projection
     commands.spawn((
         Camera3d::default(),
         Projection::from(OrthographicProjection {
@@ -200,7 +209,7 @@ fn setup(
             sub_camera_view: Some(SubCameraView {
                 full_size: UVec2::new(500, 500),
                 offset: Vec2::ZERO,
-                size: UVec2::new(100, 100),
+                size: UVec2::new(100, 100),  // 5x zoom
             }),
             order: 6,
             ..default()
@@ -210,13 +219,7 @@ fn setup(
         MovingCameraMarker,
     ));
 
-    // Orthographic camera different aspect ratio:
-    //
-    // For this camera, the projection is orthographic, and the aspect ratio of
-    // the sub view (2x1) is different to the aspect ratio of the full view
-    // (2x2). The aspect ratio of the sub view matches the aspect ratio of
-    // the viewport and should show an unstretched image of the top half of the
-    // full orthographic image.
+    // 🎭 Camera 8: Orthographic with Correct Aspect Ratio
     commands.spawn((
         Camera3d::default(),
         Projection::from(OrthographicProjection {
@@ -229,7 +232,7 @@ fn setup(
             sub_camera_view: Some(SubCameraView {
                 full_size: UVec2::new(200, 200),
                 offset: Vec2::ZERO,
-                size: UVec2::new(200, 100),
+                size: UVec2::new(200, 100),  // Top half, correct aspect
             }),
             order: 7,
             ..default()
@@ -239,25 +242,32 @@ fn setup(
     ));
 }
 
+// 🎬 Animation System: Making the "Magnifying Glass" Move
 fn move_camera_view(
     mut movable_camera_query: Query<&mut Camera, With<MovingCameraMarker>>,
     time: Res<Time>,
 ) {
     for mut camera in movable_camera_query.iter_mut() {
         if let Some(sub_view) = &mut camera.sub_camera_view {
+            // 📐 Move diagonally across the image
+            // Speed: 150 units/second, wrapping every 3.3 seconds
             sub_view.offset.x = (time.elapsed_secs() * 150.) % 450.0 - 50.0;
             sub_view.offset.y = sub_view.offset.x;
         }
     }
 }
 
-// To ensure viewports remain the same at any window size
+// 📐 Viewport Management: Responsive Layout
+//
+// This system ensures our camera grid maintains proper proportions
+// regardless of window size
 fn resize_viewports(
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
     mut viewports: Query<(&mut Camera, &ExampleViewports)>,
 ) {
     let window_size = window.physical_size();
 
+    // 📏 Calculate sizes for our grid layout
     let small_height = window_size.y / 5;
     let small_width = window_size.x / 8;
 
@@ -266,13 +276,15 @@ fn resize_viewports(
 
     let large_size = UVec2::new(large_width, large_height);
 
-    // Enforce the aspect ratio of the small viewports to ensure the images
-    // appear unstretched
+    // 🔲 Force square viewports for the small views
+    // This prevents additional distortion from the viewport itself
     let small_dim = small_height.min(small_width);
     let small_size = UVec2::new(small_dim, small_dim);
 
+    // 📐 Wide viewport for aspect-ratio demonstrations
     let small_wide_size = UVec2::new(small_dim * 2, small_dim);
 
+    // 🎯 Position each camera in our grid
     for (mut camera, example_viewport) in viewports.iter_mut() {
         if camera.viewport.is_none() {
             camera.viewport = Some(Viewport::default());
@@ -283,19 +295,21 @@ fn resize_viewports(
         };
 
         let (size, position) = match example_viewport {
-            ExampleViewports::PerspectiveMain => (large_size, UVec2::new(0, small_height)),
+            // Top row: Small examples
             ExampleViewports::PerspectiveStretched => (small_size, UVec2::ZERO),
             ExampleViewports::PerspectiveMoving => (small_size, UVec2::new(small_width, 0)),
             ExampleViewports::PerspectiveControl => {
                 (small_wide_size, UVec2::new(small_width * 2, 0))
             }
-            ExampleViewports::OrthographicMain => {
-                (large_size, UVec2::new(large_width, small_height))
-            }
             ExampleViewports::OrthographicStretched => (small_size, UVec2::new(small_width * 4, 0)),
             ExampleViewports::OrthographicMoving => (small_size, UVec2::new(small_width * 5, 0)),
             ExampleViewports::OrthographicControl => {
                 (small_wide_size, UVec2::new(small_width * 6, 0))
+            }
+            // Bottom row: Main views
+            ExampleViewports::PerspectiveMain => (large_size, UVec2::new(0, small_height)),
+            ExampleViewports::OrthographicMain => {
+                (large_size, UVec2::new(large_width, small_height))
             }
         };
 
@@ -304,6 +318,7 @@ fn resize_viewports(
     }
 }
 
+// 🏷️ Labels for our different viewport configurations
 #[derive(Component)]
 enum ExampleViewports {
     PerspectiveMain,
@@ -315,3 +330,34 @@ enum ExampleViewports {
     OrthographicMoving,
     OrthographicControl,
 }
+
+// 🎓 Deep Dive: Understanding Sub Views
+//
+// Sub views solve the fundamental problem: "What if I don't want to show
+// everything the camera sees?"
+//
+// The Math:
+// 1. Camera renders full image at `full_size` resolution
+// 2. We extract a rectangle: position = `offset`, dimensions = `size`
+// 3. This rectangle is stretched to fill the viewport
+//
+// Common Patterns:
+// - **Split Screen**: Multiple sub views of the same full image
+// - **Picture-in-Picture**: Small sub view in corner
+// - **Zoom Effect**: Small `size` relative to `full_size`
+// - **Pan Effect**: Animate `offset` over time
+// - **Screen Shake**: Rapidly change `offset` randomly
+
+// 💡 Practical Applications:
+//
+// 1. **Security Cameras**: Multiple views on one monitor
+// 2. **Racing Games**: Rear-view mirror as sub view
+// 3. **Strategy Games**: Minimap showing full level
+// 4. **Horror Games**: Restricted vision through keyhole
+// 5. **Multi-Monitor**: Span one camera across displays
+// 6. **VR/AR**: Different views for each eye
+//
+// Performance Tips:
+// - Sub views are cheap - no extra rendering!
+// - Multiple viewports cost more than sub views
+// - Beware of overdraw with overlapping viewports

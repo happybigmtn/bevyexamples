@@ -1,5 +1,10 @@
 //! This example shows how to use the ECS and the [`AsyncComputeTaskPool`]
 //! to spawn, poll, and complete tasks across systems and system ticks.
+//!
+//! Async tasks are like hiring contractors - you give them work, they go off
+//! and do it in the background, and you check back later to see if they're done.
+//! This example spawns 216 cubes (6x6x6), each with a random "processing time".
+//! Instead of freezing the game, we let them appear as they're ready!
 
 use bevy::{
     ecs::{system::SystemState, world::CommandQueue},
@@ -12,14 +17,20 @@ use std::time::Duration;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, (setup_env, add_assets, spawn_tasks))
-        .add_systems(Update, handle_tasks)
+        .add_systems(Startup, (
+            setup_env,     // Camera and lights
+            add_assets,    // Shared mesh and material
+            spawn_tasks    // Start async work
+        ))
+        .add_systems(Update, handle_tasks) // Poll for completion
         .run();
 }
 
 // Number of cubes to spawn across the x, y, and z axis
-const NUM_CUBES: u32 = 6;
+const NUM_CUBES: u32 = 6; // 6³ = 216 total cubes
 
+// Shared resources - all cubes use the same mesh and material
+// Like a factory using the same mold for all products
 #[derive(Resource, Deref)]
 struct BoxMeshHandle(Handle<Mesh>);
 
@@ -35,13 +46,17 @@ fn add_assets(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    // Create one mesh for all cubes - efficient memory usage!
     let box_mesh_handle = meshes.add(Cuboid::new(0.25, 0.25, 0.25));
     commands.insert_resource(BoxMeshHandle(box_mesh_handle));
 
+    // Pink material for visibility
     let box_material_handle = materials.add(Color::srgb(1.0, 0.2, 0.3));
     commands.insert_resource(BoxMaterialHandle(box_material_handle));
 }
 
+// Component that holds an async task
+// The task returns a CommandQueue when complete
 #[derive(Component)]
 struct ComputeTransform(Task<CommandQueue>);
 
@@ -50,27 +65,36 @@ struct ComputeTransform(Task<CommandQueue>);
 /// system, [`handle_tasks`], will poll the spawned tasks on subsequent
 /// frames/ticks, and use the results to spawn cubes
 fn spawn_tasks(mut commands: Commands) {
+    // Get the global thread pool for compute tasks
     let thread_pool = AsyncComputeTaskPool::get();
+    
+    // Create a 6x6x6 grid of tasks
     for x in 0..NUM_CUBES {
         for y in 0..NUM_CUBES {
             for z in 0..NUM_CUBES {
-                // Spawn new task on the AsyncComputeTaskPool; the task will be
-                // executed in the background, and the Task future returned by
-                // spawn() can be used to poll for the result
+                // Pre-spawn entity that will become a cube later
                 let entity = commands.spawn_empty().id();
+                
+                // Spawn async task on background thread
                 let task = thread_pool.spawn(async move {
+                    // Random processing time (50ms to 5s)
+                    // Simulates varying computational complexity
                     let duration = Duration::from_secs_f32(rand::thread_rng().gen_range(0.05..5.0));
 
-                    // Pretend this is a time-intensive function. :)
+                    // Simulate heavy computation
                     async_std::task::sleep(duration).await;
 
-                    // Such hard work, all done!
+                    // Calculate final position in grid
                     let transform = Transform::from_xyz(x as f32, y as f32, z as f32);
+                    
+                    // CommandQueue lets us defer World access
+                    // We can't access World directly from async context!
                     let mut command_queue = CommandQueue::default();
 
-                    // we use a raw command queue to pass a FnOnce(&mut World) back to be
-                    // applied in a deferred manner.
+                    // Push a closure that will run on the main thread
                     command_queue.push(move |world: &mut World| {
+                        // SystemState gives us safe World access
+                        // Like a temporary system just for this closure
                         let (box_mesh_handle, box_material_handle) = {
                             let mut system_state = SystemState::<(
                                 Res<BoxMeshHandle>,
@@ -82,22 +106,23 @@ fn spawn_tasks(mut commands: Commands) {
                             (box_mesh_handle.clone(), box_material_handle.clone())
                         };
 
+                        // Transform empty entity into visible cube
                         world
                             .entity_mut(entity)
-                            // Add our new `Mesh3d` and `MeshMaterial3d` to our tagged entity
+                            // Add rendering components
                             .insert((
                                 Mesh3d(box_mesh_handle),
                                 MeshMaterial3d(box_material_handle),
                                 transform,
                             ))
-                            // Task is complete, so remove task component from entity
+                            // Clean up - remove the task component
                             .remove::<ComputeTransform>();
                     });
 
                     command_queue
                 });
 
-                // Spawn new entity and add our new task as a component
+                // Attach task to entity - it's now "processing"
                 commands.entity(entity).insert(ComputeTransform(task));
             }
         }
@@ -110,26 +135,31 @@ fn spawn_tasks(mut commands: Commands) {
 /// removes the task component from the entity.
 fn handle_tasks(mut commands: Commands, mut transform_tasks: Query<&mut ComputeTransform>) {
     for mut task in &mut transform_tasks {
+        // Poll the task once without blocking
+        // block_on + poll_once = check if ready, don't wait
         if let Some(mut commands_queue) = block_on(future::poll_once(&mut task.0)) {
-            // append the returned command queue to have it execute later
+            // Task complete! Apply the deferred commands
             commands.append(&mut commands_queue);
         }
+        // If not ready, we'll check again next frame
     }
 }
 
 /// This system is only used to setup light and camera for the environment
 fn setup_env(mut commands: Commands) {
-    // Used to center camera on spawned cubes
+    // Center camera on the cube grid
+    // Even number of cubes: offset by 0.5 to center between cubes
+    // Odd number: center on middle cube
     let offset = if NUM_CUBES % 2 == 0 {
         (NUM_CUBES / 2) as f32 - 0.5
     } else {
         (NUM_CUBES / 2) as f32
     };
 
-    // lights
+    // Light positioned above and to the side
     commands.spawn((PointLight::default(), Transform::from_xyz(4.0, 12.0, 15.0)));
 
-    // camera
+    // Camera looks at center of cube formation
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(offset, offset, 15.0)

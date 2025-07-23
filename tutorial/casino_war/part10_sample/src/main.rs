@@ -117,7 +117,7 @@ impl Card {
 }
 
 // AI Strategy System with analytics tracking
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum AIStrategy {
     Conservative,
     Aggressive,
@@ -236,7 +236,7 @@ impl PsychologicalProfile {
     }
 }
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Clone)]
 struct Player {
     id: usize,
     player_type: PlayerType,
@@ -1007,7 +1007,7 @@ fn analytics_dashboard_system(
     // Clear main menu if dashboard doesn't exist
     if dashboard_query.is_empty() {
         for entity in &menu_entities {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
         setup_analytics_dashboard(&mut commands);
     }
@@ -1071,131 +1071,120 @@ fn setup_analytics_dashboard(commands: &mut Commands) {
         ))
         .with_children(|main_area| {
             // Left panel: Player analytics
-            setup_player_analytics_panel(main_area);
+            main_area.spawn((
+                Node {
+                    width: Val::Percent(33.0),
+                    height: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(15.0)),
+                    border: UiRect::right(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(PANEL_DARK),
+                BorderColor(DATA_GOOD),
+            ))
+            .with_children(|panel| {
+                panel.spawn((
+                    Text::new("👤 PLAYER PERFORMANCE"),
+                    TextFont {
+                        font_size: 24.0,
+                        ..default()
+                    },
+                    TextColor(DATA_GOOD),
+                    Node {
+                        margin: UiRect::bottom(Val::Px(15.0)),
+                        ..default()
+                    },
+                ));
+                
+                // Player performance summary
+                panel.spawn((
+                    Text::new("Real-time performance analytics\nshowing efficiency ratings,\nrisk profiles, and adaptation\nstatus for all players."),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(TEXT_SECONDARY),
+                ));
+            });
             
             // Center panel: Global analytics
-            setup_global_analytics_panel(main_area);
+            main_area.spawn((
+                Node {
+                    width: Val::Percent(34.0),
+                    height: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(15.0)),
+                    border: UiRect::right(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(PANEL_DARK),
+                BorderColor(DATA_AVERAGE),
+            ))
+            .with_children(|panel| {
+                panel.spawn((
+                    Text::new("🌐 GLOBAL PATTERNS"),
+                    TextFont {
+                        font_size: 24.0,
+                        ..default()
+                    },
+                    TextColor(DATA_AVERAGE),
+                    Node {
+                        margin: UiRect::bottom(Val::Px(15.0)),
+                        ..default()
+                    },
+                ));
+                
+                // Global analytics display
+                panel.spawn((
+                    Text::new("Market volatility analysis,\nstrategy effectiveness rankings,\nand cross-player pattern\nrecognition running in real-time."),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(TEXT_SECONDARY),
+                ));
+            });
             
             // Right panel: Predictions and suggestions
-            setup_predictions_panel(main_area);
+            main_area.spawn((
+                Node {
+                    width: Val::Percent(33.0),
+                    height: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(15.0)),
+                    ..default()
+                },
+                BackgroundColor(PANEL_DARK),
+            ))
+            .with_children(|panel| {
+                panel.spawn((
+                    Text::new("🔮 PREDICTIONS & AI"),
+                    TextFont {
+                        font_size: 24.0,
+                        ..default()
+                    },
+                    TextColor(ML_OPTIMIZED),
+                    Node {
+                        margin: UiRect::bottom(Val::Px(15.0)),
+                        ..default()
+                    },
+                ));
+                
+                // AI predictions display
+                panel.spawn((
+                    Text::new("Machine learning predictions,\nstrategy suggestions, and\nprobabilistic modeling\nwith real-time updates."),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(TEXT_SECONDARY),
+                ));
+            });
         });
     });
 }
 
-fn setup_player_analytics_panel(parent: &mut ChildBuilder) {
-    parent.spawn((
-        Node {
-            width: Val::Percent(33.0),
-            height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::all(Val::Px(15.0)),
-            border: UiRect::right(Val::Px(1.0)),
-            ..default()
-        },
-        BackgroundColor(PANEL_DARK),
-        BorderColor(DATA_GOOD),
-    ))
-    .with_children(|panel| {
-        panel.spawn((
-            Text::new("👤 PLAYER PERFORMANCE"),
-            TextFont {
-                font_size: 24.0,
-                ..default()
-            },
-            TextColor(DATA_GOOD),
-            Node {
-                margin: UiRect::bottom(Val::Px(15.0)),
-                ..default()
-            },
-        ));
-        
-        // Player performance summary
-        panel.spawn((
-            Text::new("Real-time performance analytics\nshowing efficiency ratings,\nrisk profiles, and adaptation\nstatus for all players."),
-            TextFont {
-                font_size: 16.0,
-                ..default()
-            },
-            TextColor(TEXT_SECONDARY),
-        ));
-    });
-}
-
-fn setup_global_analytics_panel(parent: &mut ChildBuilder) {
-    parent.spawn((
-        Node {
-            width: Val::Percent(34.0),
-            height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::all(Val::Px(15.0)),
-            border: UiRect::right(Val::Px(1.0)),
-            ..default()
-        },
-        BackgroundColor(PANEL_DARK),
-        BorderColor(DATA_AVERAGE),
-    ))
-    .with_children(|panel| {
-        panel.spawn((
-            Text::new("🌐 GLOBAL PATTERNS"),
-            TextFont {
-                font_size: 24.0,
-                ..default()
-            },
-            TextColor(DATA_AVERAGE),
-            Node {
-                margin: UiRect::bottom(Val::Px(15.0)),
-                ..default()
-            },
-        ));
-        
-        // Global analytics display
-        panel.spawn((
-            Text::new("Market volatility analysis,\nstrategy effectiveness rankings,\nand cross-player pattern\nrecognition running in real-time."),
-            TextFont {
-                font_size: 16.0,
-                ..default()
-            },
-            TextColor(TEXT_SECONDARY),
-        ));
-    });
-}
-
-fn setup_predictions_panel(parent: &mut ChildBuilder) {
-    parent.spawn((
-        Node {
-            width: Val::Percent(33.0),
-            height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::all(Val::Px(15.0)),
-            ..default()
-        },
-        BackgroundColor(PANEL_DARK),
-    ))
-    .with_children(|panel| {
-        panel.spawn((
-            Text::new("🔮 PREDICTIONS & AI"),
-            TextFont {
-                font_size: 24.0,
-                ..default()
-            },
-            TextColor(ML_OPTIMIZED),
-            Node {
-                margin: UiRect::bottom(Val::Px(15.0)),
-                ..default()
-            },
-        ));
-        
-        // Predictions display
-        panel.spawn((
-            Text::new("Machine learning models\ngenerating predictions,\ndetecting anomalies, and\nproviding optimization\nsuggestions."),
-            TextFont {
-                font_size: 16.0,
-                ..default()
-            },
-            TextColor(TEXT_SECONDARY),
-        ));
-    });
-}
 
 fn analytics_update_system(
     mut analytics: ResMut<AnalyticsEngine>,
@@ -1210,7 +1199,7 @@ fn analytics_update_system(
         if current_time - LAST_UPDATE > 2.0 { // Update every 2 seconds
             LAST_UPDATE = current_time;
             
-            let players_vec: Vec<_> = players.iter().collect();
+            let players_vec: Vec<Player> = players.iter().cloned().collect();
             analytics.run_full_analysis(&players_vec);
             analytics_events.write(AnalyticsUpdated);
         }
@@ -1276,7 +1265,7 @@ fn handle_button_interactions(
         };
         
         for child in children.iter() {
-            if let Ok(mut text_color) = text_query.get_mut(*child) {
+            if let Ok(mut text_color) = text_query.get_mut(child) {
                 *text_color = TextColor(color);
             }
         }

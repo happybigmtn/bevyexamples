@@ -1,4 +1,21 @@
 //! Demonstrates anisotropy with the glTF sample barn lamp model.
+//!
+//! 🔬 The Science of Anisotropic Materials
+//! Imagine brushing your hand across velvet - it feels different depending on
+//! which direction you stroke. That's anisotropy! In graphics, anisotropic
+//! materials reflect light differently based on the viewing angle and the
+//! material's "grain" direction. Think brushed metal, hair, fabric, or vinyl records.
+//!
+//! 🎨 What You'll See:
+//! - A barn lamp with brushed metal surfaces
+//! - Press Space to cycle through different lighting conditions
+//! - Press Enter to toggle anisotropy on/off and see the dramatic difference
+//! - Press Q to switch between the barn lamp and a test sphere
+//!
+//! 💡 Key Concepts:
+//! - Anisotropy: Direction-dependent light reflection
+//! - Tangent space: The coordinate system that defines the "grain" direction
+//! - Environment mapping: Using images to provide realistic lighting
 
 use std::fmt::Display;
 
@@ -37,12 +54,11 @@ enum LightMode {
     EnvironmentMap,
 }
 
-/// A component that stores the version of the material with anisotropy and the
-/// version of the material without it.
-///
-/// This is placed on each mesh with a material. It exists so that the
-/// appropriate system can replace the materials when the user presses Enter to
-/// turn anisotropy on and off.
+// 🎭 Material Variants: The A/B Testing Pattern
+//
+// This component stores both versions of each material - with and without
+// anisotropy. This elegant pattern allows instant switching without recreating
+// materials, perfect for comparing visual effects in real-time.
 #[derive(Component)]
 struct MaterialVariants {
     /// The version of the material in the glTF file, with anisotropy.
@@ -51,6 +67,7 @@ struct MaterialVariants {
     isotropic: Handle<StandardMaterial>,
 }
 
+// 🎬 Scene Selection
 #[derive(Default, Clone, Copy, PartialEq, Eq, Component)]
 enum Scene {
     #[default]
@@ -77,7 +94,6 @@ impl Display for Scene {
     }
 }
 
-/// The application entry point.
 fn main() {
     App::new()
         .init_resource::<AppStatus>()
@@ -96,43 +112,54 @@ fn main() {
         .run();
 }
 
-/// Creates the initial scene.
+// 🏗️ Scene Construction
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>, app_status: Res<AppStatus>) {
+    // 📷 Camera positioned for optimal viewing
     commands.spawn((
         Camera3d::default(),
         Transform::from_translation(CAMERA_INITIAL_POSITION).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
+    // ☀️ Start with directional light
     spawn_directional_light(&mut commands);
 
+    // 🏮 Load the Barn Lamp Model
+    // This glTF model includes anisotropic materials that simulate
+    // brushed metal surfaces on the lamp shade
     commands.spawn((
         SceneRoot(asset_server.load("models/AnisotropyBarnLamp/AnisotropyBarnLamp.gltf#Scene0")),
         Transform::from_xyz(0.0, 0.07, -0.13),
         Scene::BarnLamp,
     ));
 
+    // 🔮 Create Test Sphere with Anisotropic Material
+    // This sphere helps visualize how anisotropy affects curved surfaces
     commands.spawn((
         Mesh3d(
             asset_server.add(
                 Mesh::from(Sphere::new(0.1))
+                    // 🔑 Critical: Generate tangents for anisotropy!
+                    // Tangents define the "grain" direction at each vertex
                     .with_generated_tangents()
                     .unwrap(),
             ),
         ),
         MeshMaterial3d(asset_server.add(StandardMaterial {
             base_color: palettes::tailwind::GRAY_300.into(),
+            // 🌀 Anisotropy rotation: angle of the "grain" (0-1 maps to 0-2π)
             anisotropy_rotation: 0.5,
+            // 💪 Anisotropy strength: how pronounced the effect is (0-1)
             anisotropy_strength: 1.,
             ..default()
         })),
         Scene::Sphere,
-        Visibility::Hidden,
+        Visibility::Hidden,  // Start with lamp visible
     ));
 
     spawn_text(&mut commands, &app_status);
 }
 
-/// Spawns the help text.
+// 📝 UI Helper Text
 fn spawn_text(commands: &mut Commands, app_status: &AppStatus) {
     commands.spawn((
         app_status.create_help_text(),
@@ -145,12 +172,14 @@ fn spawn_text(commands: &mut Commands, app_status: &AppStatus) {
     ));
 }
 
-/// For each material, creates a version with the anisotropy removed.
-///
-/// This allows the user to press Enter to toggle anisotropy on and off.
+// 🔄 Material Variant Creation System
+//
+// This clever system automatically creates non-anisotropic versions of all
+// anisotropic materials. It runs whenever new meshes with materials are added.
 fn create_material_variants(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    // 🔍 Query for newly added meshes that don't have variants yet
     new_meshes: Query<
         (Entity, &MeshMaterial3d<StandardMaterial>),
         (
@@ -160,47 +189,60 @@ fn create_material_variants(
     >,
 ) {
     for (entity, anisotropic_material_handle) in new_meshes.iter() {
+        // 📦 Clone the original material to preserve all properties
         let Some(anisotropic_material) = materials.get(anisotropic_material_handle).cloned() else {
             continue;
         };
 
+        // 🎭 Create the variant pair
         commands.entity(entity).insert(MaterialVariants {
             anisotropic: anisotropic_material_handle.0.clone(),
+            // 🚫 Disable anisotropy by zeroing all related properties
             isotropic: materials.add(StandardMaterial {
                 anisotropy_texture: None,
                 anisotropy_strength: 0.0,
                 anisotropy_rotation: 0.0,
-                ..anisotropic_material
+                ..anisotropic_material  // Keep everything else the same
             }),
         });
     }
 }
 
-/// A system that animates the light every frame, if there is one.
+// 🌟 Light Animation System
+//
+// Creates dynamic lighting by rotating lights around the scene.
+// This helps showcase how anisotropic materials respond to changing light angles.
 fn animate_light(
     mut lights: Query<&mut Transform, Or<(With<DirectionalLight>, With<PointLight>)>>,
     time: Res<Time>,
 ) {
     let now = time.elapsed_secs();
     for mut transform in lights.iter_mut() {
+        // 🎡 Circular motion in the XZ plane
         transform.translation = vec3(ops::cos(now), 1.0, ops::sin(now)) * vec3(3.0, 4.0, 3.0);
+        // 👀 Always look at the center
         transform.look_at(Vec3::ZERO, Vec3::Y);
     }
 }
 
-/// A system that rotates the camera if the environment map is enabled.
+// 📷 Camera Rotation for Environment Map Mode
+//
+// When using environment mapping, we rotate the camera to show how
+// the anisotropic reflections change with viewing angle.
 fn rotate_camera(
     mut camera: Query<&mut Transform, With<Camera>>,
     app_status: Res<AppStatus>,
     time: Res<Time>,
     mut stopwatch: Local<Stopwatch>,
 ) {
+    // ⏱️ Only tick the stopwatch in environment map mode
     if app_status.light_mode == LightMode::EnvironmentMap {
         stopwatch.tick(time.delta());
     }
 
     let now = stopwatch.elapsed_secs();
     for mut transform in camera.iter_mut() {
+        // 🔄 Orbit around the origin
         *transform = Transform::from_translation(
             Quat::from_rotation_y(now).mul_vec3(CAMERA_INITIAL_POSITION),
         )
@@ -208,7 +250,7 @@ fn rotate_camera(
     }
 }
 
-/// Handles requests from the user to change the lighting or toggle anisotropy.
+// 🎮 Input Handling: The Interactive Experience
 fn handle_input(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -219,12 +261,11 @@ fn handle_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut app_status: ResMut<AppStatus>,
 ) {
-    // If Space was pressed, change the lighting.
+    // 🔦 Space: Cycle through lighting modes
     if keyboard.just_pressed(KeyCode::Space) {
         match app_status.light_mode {
             LightMode::Directional => {
-                // Switch to a point light. Despawn all existing lights and
-                // create the light point.
+                // Switch to point light
                 app_status.light_mode = LightMode::Point;
                 for light in lights.iter() {
                     commands.entity(light).despawn();
@@ -233,8 +274,7 @@ fn handle_input(
             }
 
             LightMode::Point => {
-                // Switch to the environment map. Despawn all existing lights,
-                // and create the skybox and environment map.
+                // Switch to environment map
                 app_status.light_mode = LightMode::EnvironmentMap;
                 for light in lights.iter() {
                     commands.entity(light).despawn();
@@ -245,8 +285,7 @@ fn handle_input(
             }
 
             LightMode::EnvironmentMap => {
-                // Switch back to a directional light. Despawn the skybox and
-                // environment map light, and recreate the directional light.
+                // Back to directional light
                 app_status.light_mode = LightMode::Directional;
                 for camera in cameras.iter() {
                     commands
@@ -259,11 +298,11 @@ fn handle_input(
         }
     }
 
-    // If Enter was pressed, toggle anisotropy on and off.
+    // 🔄 Enter: Toggle anisotropy
     if keyboard.just_pressed(KeyCode::Enter) {
         app_status.anisotropy_enabled = !app_status.anisotropy_enabled;
 
-        // Go through each mesh and alter its material.
+        // 🎭 Swap materials on all meshes
         for (mut material_handle, material_variants) in meshes.iter_mut() {
             material_handle.0 = if app_status.anisotropy_enabled {
                 material_variants.anisotropic.clone()
@@ -273,6 +312,7 @@ fn handle_input(
         }
     }
 
+    // 🎬 Q: Switch scenes
     if keyboard.just_pressed(KeyCode::KeyQ) {
         app_status.visible_scene = app_status.visible_scene.next();
         for (mut visibility, scene) in scenes.iter_mut() {
@@ -286,14 +326,17 @@ fn handle_input(
     }
 }
 
-/// A system that updates the help text based on the current app status.
+// 📝 Dynamic Help Text
 fn update_help_text(mut text_query: Query<&mut Text>, app_status: Res<AppStatus>) {
     for mut text in text_query.iter_mut() {
         *text = app_status.create_help_text();
     }
 }
 
-/// Adds the skybox and environment map to the scene.
+// 🌍 Environment Map Setup
+//
+// Environment maps provide 360° lighting from high-dynamic-range images.
+// This creates the most realistic lighting and reflections for our materials.
 fn add_skybox_and_environment_map(
     commands: &mut Commands,
     asset_server: &AssetServer,
@@ -314,7 +357,7 @@ fn add_skybox_and_environment_map(
         });
 }
 
-/// Spawns a rotating directional light.
+// ☀️ Directional Light: Like the Sun
 fn spawn_directional_light(commands: &mut Commands) {
     commands.spawn(DirectionalLight {
         color: WHITE.into(),
@@ -323,7 +366,7 @@ fn spawn_directional_light(commands: &mut Commands) {
     });
 }
 
-/// Spawns a rotating point light.
+// 💡 Point Light: Like a Light Bulb
 fn spawn_point_light(commands: &mut Commands) {
     commands.spawn(PointLight {
         color: WHITE.into(),
@@ -335,24 +378,20 @@ fn spawn_point_light(commands: &mut Commands) {
 impl AppStatus {
     /// Creates the help text as appropriate for the current app status.
     fn create_help_text(&self) -> Text {
-        // Choose the appropriate help text for the anisotropy toggle.
         let material_variant_help_text = if self.anisotropy_enabled {
             "Press Enter to disable anisotropy"
         } else {
             "Press Enter to enable anisotropy"
         };
 
-        // Choose the appropriate help text for the light toggle.
         let light_help_text = match self.light_mode {
             LightMode::Directional => "Press Space to switch to a point light",
             LightMode::Point => "Press Space to switch to an environment map",
             LightMode::EnvironmentMap => "Press Space to switch to a directional light",
         };
 
-        // Choose the appropriate help text for the scene selector.
         let mesh_help_text = format!("Press Q to change to {}", self.visible_scene.next());
 
-        // Build the `Text` object.
         format!(
             "{}\n{}\n{}",
             material_variant_help_text, light_help_text, mesh_help_text,
@@ -370,3 +409,26 @@ impl Default for AppStatus {
         }
     }
 }
+
+// 🎓 Deep Dive: Understanding Anisotropy
+//
+// Anisotropic materials have microscopic grooves or fibers that affect light
+// reflection. Unlike isotropic materials (same in all directions), anisotropic
+// materials create elongated highlights perpendicular to the surface orientation.
+//
+// Common Examples:
+// - Brushed metal: Linear scratches from manufacturing
+// - Hair/fur: Cylindrical fibers all pointing one direction  
+// - Vinyl records: Circular grooves
+// - Satin/silk fabric: Woven fibers
+//
+// Technical Implementation:
+// 1. Tangent vectors define the "grain" direction at each point
+// 2. The anisotropy rotation parameter rotates this grain
+// 3. The strength parameter controls how much the effect influences reflection
+// 4. Special BRDF (Bidirectional Reflectance Distribution Function) math
+//    creates the characteristic stretched highlights
+//
+// 💡 Performance Note:
+// Anisotropy requires additional calculations in the shader, but modern
+// GPUs handle it efficiently. The visual impact often justifies the cost!

@@ -1,6 +1,11 @@
 //! A simplified implementation of the classic game "Breakout".
 //!
 //! Demonstrates Bevy's stepping capabilities if compiled with the `bevy_debug_stepping` feature.
+//!
+//! Breakout is like tennis against a wall of bricks - bounce a ball with your paddle
+//! to destroy all the bricks. It's a perfect example of game physics: collision detection,
+//! velocity, and response. Every game concept is here: player input, physics simulation,
+//! scoring, and win/lose conditions!
 
 use bevy::{
     math::bounding::{Aabb2d, BoundingCircle, BoundingVolume, IntersectsVolume},
@@ -9,51 +14,59 @@ use bevy::{
 
 mod stepping;
 
+// GAME CONSTANTS - Tuning these values changes the feel of the game!
 // These constants are defined in `Transform` units.
 // Using the default 2D camera they correspond 1:1 with screen pixels.
-const PADDLE_SIZE: Vec2 = Vec2::new(120.0, 20.0);
-const GAP_BETWEEN_PADDLE_AND_FLOOR: f32 = 60.0;
-const PADDLE_SPEED: f32 = 500.0;
-// How close can the paddle get to the wall
-const PADDLE_PADDING: f32 = 10.0;
 
-// We set the z-value of the ball to 1 so it renders on top in the case of overlapping sprites.
+// PADDLE CONFIGURATION
+const PADDLE_SIZE: Vec2 = Vec2::new(120.0, 20.0);     // Wide and thin
+const GAP_BETWEEN_PADDLE_AND_FLOOR: f32 = 60.0;       // Paddle position
+const PADDLE_SPEED: f32 = 500.0;                      // Pixels per second
+const PADDLE_PADDING: f32 = 10.0;                     // Keep paddle away from walls
+
+// BALL CONFIGURATION
+// Z-value of 1 ensures ball renders on top of other sprites
 const BALL_STARTING_POSITION: Vec3 = Vec3::new(0.0, -50.0, 1.0);
 const BALL_DIAMETER: f32 = 30.;
-const BALL_SPEED: f32 = 400.0;
-const INITIAL_BALL_DIRECTION: Vec2 = Vec2::new(0.5, -0.5);
+const BALL_SPEED: f32 = 400.0;                        // Pixels per second
+const INITIAL_BALL_DIRECTION: Vec2 = Vec2::new(0.5, -0.5); // Down and right
 
+// ARENA BOUNDARIES
 const WALL_THICKNESS: f32 = 10.0;
-// x coordinates
+// Horizontal boundaries (x coordinates)
 const LEFT_WALL: f32 = -450.;
 const RIGHT_WALL: f32 = 450.;
-// y coordinates
+// Vertical boundaries (y coordinates)
 const BOTTOM_WALL: f32 = -300.;
 const TOP_WALL: f32 = 300.;
 
+// BRICK LAYOUT
 const BRICK_SIZE: Vec2 = Vec2::new(100., 30.);
-// These values are exact
+// Exact positioning values
 const GAP_BETWEEN_PADDLE_AND_BRICKS: f32 = 270.0;
 const GAP_BETWEEN_BRICKS: f32 = 5.0;
-// These values are lower bounds, as the number of bricks is computed
+// Minimum gaps (actual may be larger for even spacing)
 const GAP_BETWEEN_BRICKS_AND_CEILING: f32 = 20.0;
 const GAP_BETWEEN_BRICKS_AND_SIDES: f32 = 20.0;
 
+// UI CONFIGURATION
 const SCOREBOARD_FONT_SIZE: f32 = 33.0;
 const SCOREBOARD_TEXT_PADDING: Val = Val::Px(5.0);
 
-const BACKGROUND_COLOR: Color = Color::srgb(0.9, 0.9, 0.9);
-const PADDLE_COLOR: Color = Color::srgb(0.3, 0.3, 0.7);
-const BALL_COLOR: Color = Color::srgb(1.0, 0.5, 0.5);
-const BRICK_COLOR: Color = Color::srgb(0.5, 0.5, 1.0);
-const WALL_COLOR: Color = Color::srgb(0.8, 0.8, 0.8);
-const TEXT_COLOR: Color = Color::srgb(0.5, 0.5, 1.0);
-const SCORE_COLOR: Color = Color::srgb(1.0, 0.5, 0.5);
+// COLOR PALETTE - A cohesive visual theme
+const BACKGROUND_COLOR: Color = Color::srgb(0.9, 0.9, 0.9);  // Light gray
+const PADDLE_COLOR: Color = Color::srgb(0.3, 0.3, 0.7);      // Blue
+const BALL_COLOR: Color = Color::srgb(1.0, 0.5, 0.5);        // Light red
+const BRICK_COLOR: Color = Color::srgb(0.5, 0.5, 1.0);       // Light blue
+const WALL_COLOR: Color = Color::srgb(0.8, 0.8, 0.8);        // Gray
+const TEXT_COLOR: Color = Color::srgb(0.5, 0.5, 1.0);        // Blue
+const SCORE_COLOR: Color = Color::srgb(1.0, 0.5, 0.5);       // Red
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(
+            // Debug stepping plugin - allows frame-by-frame execution
             stepping::SteppingPlugin::default()
                 .add_schedule(Update)
                 .add_schedule(FixedUpdate)
@@ -63,40 +76,42 @@ fn main() {
         .insert_resource(ClearColor(BACKGROUND_COLOR))
         .add_event::<CollisionEvent>()
         .add_systems(Startup, setup)
-        // Add our gameplay simulation systems to the fixed timestep schedule
-        // which runs at 64 Hz by default
+        // FIXED TIMESTEP for consistent physics!
+        // Runs at 64 Hz regardless of frame rate
         .add_systems(
             FixedUpdate,
             (
-                apply_velocity,
-                move_paddle,
-                check_for_collisions,
-                play_collision_sound,
+                apply_velocity,           // Move ball
+                move_paddle,              // Handle input
+                check_for_collisions,     // Physics!
+                play_collision_sound,     // Audio feedback
             )
-                // `chain`ing systems together runs them in order
+                // Chain ensures these run in order - crucial for physics!
                 .chain(),
         )
         .add_systems(Update, update_scoreboard)
         .run();
 }
 
-#[derive(Component)]
-struct Paddle;
+// COMPONENT DEFINITIONS - Tags and data for our game entities
 
 #[derive(Component)]
-struct Ball;
+struct Paddle; // Player-controlled platform
+
+#[derive(Component)]
+struct Ball; // The bouncing projectile
 
 #[derive(Component, Deref, DerefMut)]
-struct Velocity(Vec2);
+struct Velocity(Vec2); // Movement vector - pixels per second
 
 #[derive(Event, Default)]
-struct CollisionEvent;
+struct CollisionEvent; // Fired when ball hits something
 
 #[derive(Component)]
-struct Brick;
+struct Brick; // Destructible targets
 
 #[derive(Resource, Deref)]
-struct CollisionSound(Handle<AudioSource>);
+struct CollisionSound(Handle<AudioSource>); // Collision audio
 
 // Default must be implemented to define this as a required component for the Wall component below
 #[derive(Component, Default)]

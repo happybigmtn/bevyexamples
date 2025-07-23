@@ -1,4 +1,24 @@
 //! This example compares MSAA (Multi-Sample Anti-aliasing), FXAA (Fast Approximate Anti-aliasing), and TAA (Temporal Anti-aliasing).
+//!
+//! 🎮 The Quest for Smooth Edges: Understanding Anti-Aliasing
+//!
+//! Imagine you're drawing a diagonal line on graph paper - you can't make it perfectly
+//! smooth, only approximate it with stair-steps. That's aliasing! In 3D graphics,
+//! this creates jagged edges (aka "jaggies") that break immersion. Anti-aliasing
+//! techniques smooth these edges, each with unique trade-offs between quality and performance.
+//!
+//! 🎨 What You'll See:
+//! - A scene with various geometric edges and textures
+//! - Press 1-5 to switch between anti-aliasing methods
+//! - Press Q/W/E/R/T to adjust quality settings for each method
+//! - Press 0 to toggle contrast adaptive sharpening
+//! - Watch how each technique handles different edge types!
+//!
+//! 🔑 Key Concepts:
+//! - MSAA: Renders at higher resolution, then downsamples (hardware-based)
+//! - FXAA: Post-process edge detection and smoothing (fast but can blur)
+//! - SMAA: Enhanced edge detection with pattern recognition
+//! - TAA: Uses motion vectors to accumulate samples over time (great quality, can ghost)
 
 use std::{f32::consts::PI, fmt::Write};
 
@@ -29,14 +49,20 @@ fn main() {
         .run();
 }
 
+// 🎯 TAA Component Bundle
+// TAA needs several components working together for temporal accumulation
 type TaaComponents = (
     TemporalAntiAliasing,
-    TemporalJitter,
-    MipBias,
-    DepthPrepass,
-    MotionVectorPrepass,
+    TemporalJitter,      // Jitters camera slightly each frame
+    MipBias,             // Adjusts texture sampling for stability
+    DepthPrepass,        // Provides depth info for reprojection
+    MotionVectorPrepass, // Tracks pixel movement between frames
 );
 
+// 🎮 Anti-Aliasing Control System
+//
+// This system handles user input to switch between different AA methods
+// and adjust their quality settings. Each method has unique strengths!
 fn modify_aa(
     keys: Res<ButtonInput<KeyCode>>,
     camera: Single<
@@ -54,7 +80,7 @@ fn modify_aa(
     let (camera_entity, fxaa, smaa, taa, mut msaa) = camera.into_inner();
     let mut camera = commands.entity(camera_entity);
 
-    // No AA
+    // 🚫 No AA - See the raw, jaggy truth!
     if keys.just_pressed(KeyCode::Digit1) {
         *msaa = Msaa::Off;
         camera
@@ -63,7 +89,8 @@ fn modify_aa(
             .remove::<TaaComponents>();
     }
 
-    // MSAA
+    // 🔲 MSAA (Multi-Sample Anti-Aliasing)
+    // The classic hardware solution - renders multiple samples per pixel
     if keys.just_pressed(KeyCode::Digit2) && *msaa == Msaa::Off {
         camera
             .remove::<Fxaa>()
@@ -73,20 +100,22 @@ fn modify_aa(
         *msaa = Msaa::Sample4;
     }
 
-    // MSAA Sample Count
+    // 📊 MSAA Sample Count Options
+    // More samples = smoother edges but higher GPU cost
     if *msaa != Msaa::Off {
         if keys.just_pressed(KeyCode::KeyQ) {
-            *msaa = Msaa::Sample2;
+            *msaa = Msaa::Sample2;  // Light smoothing
         }
         if keys.just_pressed(KeyCode::KeyW) {
-            *msaa = Msaa::Sample4;
+            *msaa = Msaa::Sample4;  // Balanced quality
         }
         if keys.just_pressed(KeyCode::KeyE) {
-            *msaa = Msaa::Sample8;
+            *msaa = Msaa::Sample8;  // Premium smoothness
         }
     }
 
-    // FXAA
+    // 🏃 FXAA (Fast Approximate Anti-Aliasing)
+    // Post-process edge detection - very fast but can blur textures
     if keys.just_pressed(KeyCode::Digit3) && fxaa.is_none() {
         *msaa = Msaa::Off;
         camera
@@ -95,31 +124,38 @@ fn modify_aa(
             .insert(Fxaa::default());
     }
 
-    // FXAA Settings
+    // 🎚️ FXAA Sensitivity Settings
+    // Controls how aggressively it detects and smooths edges
     if let Some(mut fxaa) = fxaa {
         if keys.just_pressed(KeyCode::KeyQ) {
+            // Low: Only obvious edges
             fxaa.edge_threshold = Sensitivity::Low;
             fxaa.edge_threshold_min = Sensitivity::Low;
         }
         if keys.just_pressed(KeyCode::KeyW) {
+            // Medium: Balanced detection
             fxaa.edge_threshold = Sensitivity::Medium;
             fxaa.edge_threshold_min = Sensitivity::Medium;
         }
         if keys.just_pressed(KeyCode::KeyE) {
+            // High: More aggressive smoothing
             fxaa.edge_threshold = Sensitivity::High;
             fxaa.edge_threshold_min = Sensitivity::High;
         }
         if keys.just_pressed(KeyCode::KeyR) {
+            // Ultra: Smooth most edges
             fxaa.edge_threshold = Sensitivity::Ultra;
             fxaa.edge_threshold_min = Sensitivity::Ultra;
         }
         if keys.just_pressed(KeyCode::KeyT) {
+            // Extreme: Maximum smoothing (may over-blur)
             fxaa.edge_threshold = Sensitivity::Extreme;
             fxaa.edge_threshold_min = Sensitivity::Extreme;
         }
     }
 
-    // SMAA
+    // 🧠 SMAA (Enhanced Subpixel Morphological Anti-Aliasing)
+    // Smarter edge detection with pattern recognition
     if keys.just_pressed(KeyCode::Digit4) && smaa.is_none() {
         *msaa = Msaa::Off;
         camera
@@ -128,23 +164,24 @@ fn modify_aa(
             .insert(Smaa::default());
     }
 
-    // SMAA Settings
+    // 🎯 SMAA Quality Presets
     if let Some(mut smaa) = smaa {
         if keys.just_pressed(KeyCode::KeyQ) {
-            smaa.preset = SmaaPreset::Low;
+            smaa.preset = SmaaPreset::Low;     // Fast, basic edge detection
         }
         if keys.just_pressed(KeyCode::KeyW) {
-            smaa.preset = SmaaPreset::Medium;
+            smaa.preset = SmaaPreset::Medium;  // Good balance
         }
         if keys.just_pressed(KeyCode::KeyE) {
-            smaa.preset = SmaaPreset::High;
+            smaa.preset = SmaaPreset::High;    // Quality focus
         }
         if keys.just_pressed(KeyCode::KeyR) {
-            smaa.preset = SmaaPreset::Ultra;
+            smaa.preset = SmaaPreset::Ultra;   // Maximum quality
         }
     }
 
-    // TAA
+    // ⏰ TAA (Temporal Anti-Aliasing)
+    // Uses previous frames to accumulate samples - excellent quality!
     if keys.just_pressed(KeyCode::Digit5) && taa.is_none() {
         *msaa = Msaa::Off;
         camera
@@ -154,23 +191,32 @@ fn modify_aa(
     }
 }
 
+// 🔪 Sharpening Control System
+//
+// Anti-aliasing can soften the image. Contrast Adaptive Sharpening (CAS)
+// intelligently restores detail without creating artifacts.
 fn modify_sharpening(
     keys: Res<ButtonInput<KeyCode>>,
     mut query: Query<&mut ContrastAdaptiveSharpening>,
 ) {
     for mut cas in &mut query {
+        // Toggle sharpening on/off
         if keys.just_pressed(KeyCode::Digit0) {
             cas.enabled = !cas.enabled;
         }
+        
         if cas.enabled {
+            // Decrease sharpening strength
             if keys.just_pressed(KeyCode::Minus) {
                 cas.sharpening_strength -= 0.1;
                 cas.sharpening_strength = cas.sharpening_strength.clamp(0.0, 1.0);
             }
+            // Increase sharpening strength
             if keys.just_pressed(KeyCode::Equal) {
                 cas.sharpening_strength += 0.1;
                 cas.sharpening_strength = cas.sharpening_strength.clamp(0.0, 1.0);
             }
+            // Toggle denoising (reduces grain in dark areas)
             if keys.just_pressed(KeyCode::KeyD) {
                 cas.denoise = !cas.denoise;
             }
@@ -178,6 +224,9 @@ fn modify_sharpening(
     }
 }
 
+// 📊 UI Update System
+//
+// Shows the current anti-aliasing method and settings
 fn update_ui(
     camera: Single<
         (
@@ -196,6 +245,7 @@ fn update_ui(
     let ui = &mut ui.0;
     *ui = "Antialias Method\n".to_string();
 
+    // Show which AA method is active
     draw_selectable_menu_item(
         ui,
         "No AA",
@@ -207,6 +257,7 @@ fn update_ui(
     draw_selectable_menu_item(ui, "SMAA", '4', smaa.is_some());
     draw_selectable_menu_item(ui, "TAA", '5', taa.is_some());
 
+    // Show MSAA sample options
     if *msaa != Msaa::Off {
         ui.push_str("\n----------\n\nSample Count\n");
         draw_selectable_menu_item(ui, "2", 'Q', *msaa == Msaa::Sample2);
@@ -214,6 +265,7 @@ fn update_ui(
         draw_selectable_menu_item(ui, "8", 'E', *msaa == Msaa::Sample8);
     }
 
+    // Show FXAA sensitivity options
     if let Some(fxaa) = fxaa {
         ui.push_str("\n----------\n\nSensitivity\n");
         draw_selectable_menu_item(ui, "Low", 'Q', fxaa.edge_threshold == Sensitivity::Low);
@@ -233,6 +285,7 @@ fn update_ui(
         );
     }
 
+    // Show SMAA quality options
     if let Some(smaa) = smaa {
         ui.push_str("\n----------\n\nQuality\n");
         draw_selectable_menu_item(ui, "Low", 'Q', smaa.preset == SmaaPreset::Low);
@@ -241,6 +294,7 @@ fn update_ui(
         draw_selectable_menu_item(ui, "Ultra", 'R', smaa.preset == SmaaPreset::Ultra);
     }
 
+    // Show sharpening options
     ui.push_str("\n----------\n\n");
     draw_selectable_menu_item(ui, "Sharpening", '0', cas.enabled);
 
@@ -250,7 +304,7 @@ fn update_ui(
     }
 }
 
-/// Set up a simple 3D scene
+// 🏗️ Scene Setup: A Perfect Anti-Aliasing Test Lab
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -258,18 +312,20 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     asset_server: Res<AssetServer>,
 ) {
-    // Plane
+    // 🌍 Ground plane
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(50.0, 50.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.1, 0.2, 0.1))),
     ));
 
+    // 🎨 Create a material with our debug texture
     let cube_material = materials.add(StandardMaterial {
         base_color_texture: Some(images.add(uv_debug_texture())),
         ..default()
     });
 
-    // Cubes
+    // 📦 Small cubes with high-contrast textures
+    // These show aliasing artifacts clearly
     for i in 0..5 {
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::new(0.25, 0.25, 0.25))),
@@ -278,12 +334,12 @@ fn setup(
         ));
     }
 
-    // Flight Helmet
+    // 🚁 Flight Helmet - Complex geometry with fine details
     commands.spawn(SceneRoot(asset_server.load(
         GltfAssetLabel::Scene(0).from_asset("models/FlightHelmet/FlightHelmet.gltf"),
     )));
 
-    // Light
+    // ☀️ Directional light with shadows
     commands.spawn((
         DirectionalLight {
             illuminance: light_consts::lux::FULL_DAYLIGHT,
@@ -291,6 +347,7 @@ fn setup(
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, PI * -0.15, PI * -0.15)),
+        // Shadow cascades for better shadow quality
         CascadeShadowConfigBuilder {
             maximum_distance: 3.0,
             first_cascade_far_bound: 0.9,
@@ -299,21 +356,24 @@ fn setup(
         .build(),
     ));
 
-    // Camera
+    // 📷 Camera setup
     commands.spawn((
         Camera3d::default(),
-        Hdr,
+        Hdr,  // High Dynamic Range for better lighting
         Transform::from_xyz(0.7, 0.7, 1.0).looking_at(Vec3::new(0.0, 0.3, 0.0), Vec3::Y),
+        // Start with sharpening disabled
         ContrastAdaptiveSharpening {
             enabled: false,
             ..default()
         },
+        // Environment lighting
         EnvironmentMapLight {
             diffuse_map: asset_server.load("environment_maps/pisa_diffuse_rgb9e5_zstd.ktx2"),
             specular_map: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
             intensity: 150.0,
             ..default()
         },
+        // Fog for depth
         DistanceFog {
             color: Color::srgba_u8(43, 44, 47, 255),
             falloff: FogFalloff::Linear {
@@ -324,7 +384,7 @@ fn setup(
         },
     ));
 
-    // example instructions
+    // 📝 UI text
     commands.spawn((
         Text::default(),
         Node {
@@ -336,28 +396,34 @@ fn setup(
     ));
 }
 
-/// Writes a simple menu item that can be on or off.
+// 🖊️ Helper function for menu formatting
 fn draw_selectable_menu_item(ui: &mut String, label: &str, shortcut: char, enabled: bool) {
     let star = if enabled { "*" } else { "" };
     let _ = writeln!(*ui, "({shortcut}) {star}{label}{star}");
 }
 
-/// Creates a colorful test pattern
+// 🎨 Creates a High-Contrast Debug Texture
+//
+// This texture is perfect for seeing aliasing artifacts - it has
+// sharp color transitions that make jagged edges very visible
 fn uv_debug_texture() -> Image {
     const TEXTURE_SIZE: usize = 8;
 
+    // Define a colorful palette with high contrast
     let mut palette: [u8; 32] = [
         255, 102, 159, 255, 255, 159, 102, 255, 236, 255, 102, 255, 121, 255, 102, 255, 102, 255,
         198, 255, 102, 198, 255, 255, 121, 102, 255, 255, 236, 102, 255, 255,
     ];
 
+    // Create the texture data
     let mut texture_data = [0; TEXTURE_SIZE * TEXTURE_SIZE * 4];
     for y in 0..TEXTURE_SIZE {
         let offset = TEXTURE_SIZE * y * 4;
         texture_data[offset..(offset + TEXTURE_SIZE * 4)].copy_from_slice(&palette);
-        palette.rotate_right(4);
+        palette.rotate_right(4);  // Shift colors for each row
     }
 
+    // Build the image
     let mut img = Image::new_fill(
         Extent3d {
             width: TEXTURE_SIZE as u32,
@@ -372,3 +438,39 @@ fn uv_debug_texture() -> Image {
     img.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor::default());
     img
 }
+
+// 🎓 Deep Dive: Anti-Aliasing Techniques Compared
+//
+// **No AA**: Raw pixels, maximum sharpness but jagged edges
+// - Best for: Pixel art, retro aesthetics
+// - Performance: Fastest possible
+//
+// **MSAA (Multi-Sample Anti-Aliasing)**:
+// - How: Renders multiple samples per pixel at geometry edges
+// - Pros: Hardware accelerated, no blur, works well with deferred rendering
+// - Cons: High memory usage, doesn't help with shader aliasing
+// - Performance: 2x = Good, 4x = Moderate, 8x = Heavy
+//
+// **FXAA (Fast Approximate Anti-Aliasing)**:
+// - How: Post-process filter that detects and smooths edges
+// - Pros: Very fast, works on everything (geometry + shaders)
+// - Cons: Can blur textures, may miss some edges
+// - Performance: Minimal impact
+//
+// **SMAA (Enhanced Subpixel Morphological Anti-Aliasing)**:
+// - How: Advanced edge detection with pattern matching
+// - Pros: Better edge detection than FXAA, less blur
+// - Cons: More expensive than FXAA
+// - Performance: Low to moderate impact
+//
+// **TAA (Temporal Anti-Aliasing)**:
+// - How: Accumulates samples across multiple frames
+// - Pros: Excellent quality, handles all aliasing types
+// - Cons: Can cause ghosting on fast motion, adds latency
+// - Performance: Moderate impact
+//
+// 💡 Pro Tips:
+// - For competitive gaming: FXAA or low MSAA for minimal latency
+// - For cinematic quality: TAA with sharpening
+// - For best performance: FXAA with slight sharpening
+// - For best quality/perf ratio: SMAA High or TAA

@@ -1,75 +1,146 @@
-//! Demonstrates how Display and Visibility work in the UI.
+//! # UI Display and Visibility Example
+//! 
+//! This example demonstrates the crucial differences between Display and Visibility properties in Bevy 0.16 UI.
+//! 
+//! ## What You'll Learn
+//! - The difference between `Display` and `Visibility` and when to use each
+//! - How `Display::None` removes elements from layout calculations
+//! - How `Visibility::Hidden` hides elements but preserves layout space
+//! - Understanding `Visibility::Inherited` for hierarchical visibility control
+//! - Creating interactive UI demonstrations with buttons and real-time updates
+//! - Building complex nested UI hierarchies with proper layout management
+//! - Using trait systems for generic UI behavior across different component types
+//! 
+//! ## Key Concepts
+//! - **Display**: Controls whether an element participates in layout (Flex, None, Block, Grid)
+//! - **Visibility**: Controls whether an element is rendered while preserving layout space
+//! - **Layout Space**: The area an element occupies in the UI layout calculation
+//! - **Inheritance**: How child elements can inherit properties from their parents
+//! - **Interactive Demonstration**: Using buttons to dynamically change properties
+//! 
+//! ## Display vs Visibility Comparison
+//! | Property | Effect | Layout Space | Use Case |
+//! |----------|--------|--------------|----------|
+//! | `Display::Flex` | Visible and participates in layout | Occupies space | Normal UI elements |
+//! | `Display::None` | Invisible and removed from layout | No space | Temporary removal |
+//! | `Visibility::Visible` | Visible and participates in layout | Occupies space | Force visibility |
+//! | `Visibility::Hidden` | Invisible but still in layout | Occupies space | Hide while maintaining layout |
+//! | `Visibility::Inherited` | Inherits parent's visibility | Depends on parent | Default behavior |
+//! 
+//! ## Interactive Controls
+//! Use the buttons in the right panel to toggle Display and Visibility properties for the corresponding
+//! nested elements in the left panel. Notice how the layout changes differently for each property.
 
 use bevy::{
-    color::palettes::css::{DARK_CYAN, DARK_GRAY, YELLOW},
-    ecs::{component::Mutable, hierarchy::ChildSpawnerCommands},
-    prelude::*,
-    winit::WinitSettings,
+    color::palettes::css::{DARK_CYAN, DARK_GRAY, YELLOW}, // Pre-defined color constants
+    ecs::{component::Mutable, hierarchy::ChildSpawnerCommands}, // ECS component utilities
+    prelude::*,        // Core Bevy types and traits
+    winit::WinitSettings, // Window management settings for performance
 };
 
+// Color palette for the nested UI elements - provides visual distinction between hierarchy levels
+// Using hex strings that will be converted to Color values for a cohesive blue gradient theme
 const PALETTE: [&str; 4] = ["27496D", "466B7A", "669DB3", "ADCBE3"];
+
+// Color used to indicate hidden/invisible elements in the UI
+// Light red tint helps users identify when elements are in hidden states
 const HIDDEN_COLOR: Color = Color::srgb(1.0, 0.7, 0.7);
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        // Only run the app when there is user input. This will significantly reduce CPU/GPU use.
+        
+        // Performance optimization: only run the app when there is user input
+        // This significantly reduces CPU/GPU usage for demonstration applications
         .insert_resource(WinitSettings::desktop_app())
+        
+        // Initialize the demonstration UI once at startup
         .add_systems(Startup, setup)
+        
+        // Update systems that run every frame to handle interactions
         .add_systems(
             Update,
             (
-                buttons_handler::<Display>,
-                buttons_handler::<Visibility>,
+                // Generic button handlers for different property types
+                // These use Rust generics to handle both Display and Visibility buttons
+                buttons_handler::<Display>,    // Handle Display property toggle buttons
+                buttons_handler::<Visibility>, // Handle Visibility property toggle buttons
+                
+                // Visual feedback system for button hover states
                 text_hover,
             ),
         )
-        .run();
+        .run(); // Start the application main loop
 }
 
+// Generic component that links a button to a target entity for property manipulation
+// The generic type T represents which property type this button controls (Display or Visibility)
+// PhantomData is used because we need the type information but don't store actual T data
 #[derive(Component)]
 struct Target<T> {
-    id: Entity,
-    phantom: std::marker::PhantomData<T>,
+    id: Entity,  // The entity whose properties this button will modify
+    phantom: std::marker::PhantomData<T>, // Zero-size type marker for generic type safety
 }
 
 impl<T> Target<T> {
     fn new(id: Entity) -> Self {
         Self {
             id,
-            phantom: std::marker::PhantomData,
+            phantom: std::marker::PhantomData, // Rust requires this for generic type parameters
         }
     }
 }
 
+// Trait that defines how different property types can be updated by buttons
+// This demonstrates advanced Rust patterns: associated types, const generics, and trait bounds
 trait TargetUpdate {
+    // Associated type: which component type this target updates
+    // Mutability bound ensures we can modify the component
     type TargetComponent: Component<Mutability = Mutable>;
+    
+    // Associated constant: human-readable name for UI display
     const NAME: &'static str;
+    
+    // Method to toggle the property and return a description of the new state
     fn update_target(&self, target: &mut Self::TargetComponent) -> String;
 }
 
+// Implementation for Display property buttons
+// Display controls whether an element participates in layout calculations
 impl TargetUpdate for Target<Display> {
-    type TargetComponent = Node;
+    type TargetComponent = Node;  // Display is a field of the Node component
     const NAME: &'static str = "Display";
+    
     fn update_target(&self, node: &mut Self::TargetComponent) -> String {
+        // Toggle between the two main display states used in this example
         node.display = match node.display {
-            Display::Flex => Display::None,
-            Display::None => Display::Flex,
+            Display::Flex => Display::None,  // Hide and remove from layout
+            Display::None => Display::Flex,  // Show and participate in layout
+            
+            // This example only uses Flex and None, other variants are not used
             Display::Block | Display::Grid => unreachable!(),
         };
+        
+        // Return a description of the new state for the button text
         format!("{}::{:?} ", Self::NAME, node.display)
     }
 }
 
+// Implementation for Visibility property buttons  
+// Visibility controls rendering while preserving layout space
 impl TargetUpdate for Target<Visibility> {
-    type TargetComponent = Visibility;
+    type TargetComponent = Visibility;  // Visibility is its own component
     const NAME: &'static str = "Visibility";
+    
     fn update_target(&self, visibility: &mut Self::TargetComponent) -> String {
+        // Cycle through all three visibility states to demonstrate differences
         *visibility = match *visibility {
-            Visibility::Inherited => Visibility::Visible,
-            Visibility::Visible => Visibility::Hidden,
-            Visibility::Hidden => Visibility::Inherited,
+            Visibility::Inherited => Visibility::Visible,  // Force visible
+            Visibility::Visible => Visibility::Hidden,     // Hide but keep layout space
+            Visibility::Hidden => Visibility::Inherited,   // Use parent's visibility
         };
+        
+        // Return a description of the new state for the button text
         format!("{}::{visibility:?}", Self::NAME)
     }
 }

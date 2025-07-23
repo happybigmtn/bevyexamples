@@ -197,7 +197,7 @@ enum PlayerType {
     AI(AIStrategy),
 }
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Clone)]
 struct Player {
     id: usize,
     player_type: PlayerType,
@@ -647,7 +647,7 @@ fn main() {
         .add_systems(Update, (
             main_menu_system.run_if(in_state(GamePhase::MainMenu)),
             pre_tournament_system.run_if(in_state(GamePhase::PreTournament)),
-            tournament_timer_system.run_if(in_state(GamePhase::Tournament).or_else(in_state(GamePhase::Overtime))),
+            tournament_timer_system.run_if(in_state(GamePhase::Tournament).or(in_state(GamePhase::Overtime))),
             tournament_system.run_if(in_state(GamePhase::Tournament)),
             overtime_system.run_if(in_state(GamePhase::Overtime)),
             results_system.run_if(in_state(GamePhase::Results)),
@@ -786,7 +786,7 @@ fn pre_tournament_system(
 ) {
     // Clear main menu
     for entity in &menu_entities {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
     
     // Setup tournament UI
@@ -895,66 +895,63 @@ fn setup_tournament_ui(commands: &mut Commands) {
             });
             
             // Leaderboard (40%)
-            setup_live_leaderboard(main_area);
+            main_area.spawn((
+                Node {
+                    width: Val::Percent(40.0),
+                    height: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(20.0)),
+                    border: UiRect::left(Val::Px(2.0)),
+                    ..default()
+                },
+                BackgroundColor(PANEL_DARK),
+                BorderColor(MCLAREN_ORANGE),
+            ))
+            .with_children(|leaderboard| {
+                // Header
+                leaderboard.spawn((
+                    Text::new("🏁 LIVE STANDINGS"),
+                    TextFont {
+                        font_size: 28.0,
+                        ..default()
+                    },
+                    TextColor(FIRST_PLACE),
+                    Node {
+                        margin: UiRect::bottom(Val::Px(20.0)),
+                        ..default()
+                    },
+                ));
+                
+                // Time pressure indicator
+                leaderboard.spawn((
+                    Text::new("⚡ TIME PRESSURE: NORMAL"),
+                    TextFont {
+                        font_size: 18.0,
+                        ..default()
+                    },
+                    TextColor(TIME_NORMAL),
+                    UrgencyIndicator,
+                    Node {
+                        margin: UiRect::bottom(Val::Px(15.0)),
+                        ..default()
+                    },
+                ));
+                
+                // Standings list
+                leaderboard.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(70.0),
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                    StandingsDisplay,
+                ));
+            });
         });
     });
 }
 
-fn setup_live_leaderboard(parent: &mut ChildBuilder) {
-    parent.spawn((
-        Node {
-            width: Val::Percent(40.0),
-            height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::all(Val::Px(20.0)),
-            border: UiRect::left(Val::Px(2.0)),
-            ..default()
-        },
-        BackgroundColor(PANEL_DARK),
-        BorderColor(MCLAREN_ORANGE),
-    ))
-    .with_children(|leaderboard| {
-        // Header
-        leaderboard.spawn((
-            Text::new("🏁 LIVE STANDINGS"),
-            TextFont {
-                font_size: 28.0,
-                ..default()
-            },
-            TextColor(FIRST_PLACE),
-            Node {
-                margin: UiRect::bottom(Val::Px(20.0)),
-                ..default()
-            },
-        ));
-        
-        // Time pressure indicator
-        leaderboard.spawn((
-            Text::new("⚡ TIME PRESSURE: NORMAL"),
-            TextFont {
-                font_size: 18.0,
-                ..default()
-            },
-            TextColor(TIME_NORMAL),
-            UrgencyIndicator,
-            Node {
-                margin: UiRect::bottom(Val::Px(15.0)),
-                ..default()
-            },
-        ));
-        
-        // Standings list
-        leaderboard.spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(70.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            StandingsDisplay,
-        ));
-    });
-}
 
 // PART 9: Core Tournament Systems
 
@@ -975,13 +972,17 @@ fn tournament_timer_system(
     // Trigger events on urgency level changes
     if old_urgency != new_urgency {
         match new_urgency {
-            UrgencyLevel::Warning => warning_events.write(TimeWarningTriggered),
-            UrgencyLevel::Critical => critical_events.write(TimeCriticalTriggered),
+            UrgencyLevel::Warning => {
+                warning_events.write(TimeWarningTriggered);
+            }
+            UrgencyLevel::Critical => {
+                critical_events.write(TimeCriticalTriggered);
+            }
             UrgencyLevel::Overtime => {
                 overtime_events.write(OvertimeEntered);
                 next_state.set(GamePhase::Overtime);
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
     
@@ -1013,7 +1014,7 @@ fn overtime_system(
         timer.final_hand_started = true;
         
         // Finalize standings when overtime starts
-        let players_vec: Vec<_> = players.iter().collect();
+        let players_vec: Vec<Player> = players.iter().cloned().collect();
         tournament.finalize_standings(&players_vec);
     }
 }
@@ -1026,7 +1027,7 @@ fn results_system(
 ) {
     // Clear tournament UI
     for entity in &tournament_entities {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
     
     // Show results
@@ -1254,7 +1255,7 @@ fn handle_button_interactions(
         };
         
         for child in children.iter() {
-            if let Ok(mut text_color) = text_query.get_mut(*child) {
+            if let Ok(mut text_color) = text_query.get_mut(child) {
                 *text_color = TextColor(color);
             }
         }

@@ -1,4 +1,30 @@
 //! Demonstrates color grading with an interactive adjustment UI.
+//!
+//! 🎨 The Digital Darkroom: Understanding Color Grading
+//!
+//! Remember the last time you used a photo filter on your phone? That's color
+//! grading! It's the art of adjusting colors to create mood and atmosphere.
+//! In films, it's why The Matrix has that green tint, or why Mexico always
+//! looks orange in Hollywood movies. This example lets you play cinematographer,
+//! adjusting every aspect of color in real-time!
+//!
+//! 🎯 What You'll See:
+//! - A test scene with various colors and lighting
+//! - Interactive buttons to adjust different color properties
+//! - Real-time feedback showing how each setting affects the image
+//! - Separate controls for highlights, midtones, and shadows
+//!
+//! 🎮 Controls:
+//! - Click any button to select a color grading option
+//! - Left/Right arrows to adjust the selected value
+//! - Watch the scene transform with your adjustments!
+//!
+//! 🔑 Key Concepts:
+//! - Global Controls: Affect the entire image
+//! - Section Controls: Target specific brightness ranges
+//! - Highlights: The brightest parts of the image
+//! - Midtones: The middle brightness values
+//! - Shadows: The darkest areas
 
 use std::{
     f32::consts::PI,
@@ -87,6 +113,7 @@ enum ColorGradingOptionWidgetType {
     Value,
 }
 
+// 🏷️ Widget component that connects UI elements to color grading options
 #[derive(Clone, Copy, Component)]
 struct ColorGradingOptionWidget {
     widget_type: ColorGradingOptionWidgetType,
@@ -114,6 +141,7 @@ fn main() {
         .run();
 }
 
+// 🏗️ Initial Setup: Creating Our Color Laboratory
 fn setup(
     mut commands: Commands,
     currently_selected_option: Res<SelectedColorGradingOption>,
@@ -134,9 +162,12 @@ fn setup(
     add_camera(&mut commands, &asset_server, color_grading);
 }
 
-/// Adds all the buttons on the bottom of the scene.
+// 🎛️ UI Construction: Building the Control Panel
+//
+// Creates a grid of buttons for adjusting color grading parameters.
+// Think of it as a mixing board for colors!
 fn add_buttons(commands: &mut Commands, font: &Handle<Font>, color_grading: &ColorGrading) {
-    // Spawn the parent node that contains all the buttons.
+    // 📦 Parent container for all controls
     commands
         .spawn(Node {
             flex_direction: FlexDirection::Column,
@@ -147,10 +178,10 @@ fn add_buttons(commands: &mut Commands, font: &Handle<Font>, color_grading: &Col
             ..default()
         })
         .with_children(|parent| {
-            // Create the first row, which contains the global controls.
+            // 🌍 Global controls row
             add_buttons_for_global_controls(parent, color_grading, font);
 
-            // Create the rows for individual controls.
+            // 🎨 Section-specific controls
             for section in [
                 SelectedColorGradingSection::Highlights,
                 SelectedColorGradingSection::Midtones,
@@ -161,27 +192,28 @@ fn add_buttons(commands: &mut Commands, font: &Handle<Font>, color_grading: &Col
         });
 }
 
-/// Adds the buttons for the global controls (those that control the scene as a
-/// whole as opposed to shadows, midtones, or highlights).
+// 🌐 Global Controls: The Master Adjustments
+//
+// These affect the entire image uniformly, like adjusting the overall
+// brightness or warmth of a photo.
 fn add_buttons_for_global_controls(
     parent: &mut ChildSpawnerCommands,
     color_grading: &ColorGrading,
     font: &Handle<Font>,
 ) {
-    // Add the parent node for the row.
     parent.spawn(Node::default()).with_children(|parent| {
-        // Add some placeholder text to fill this column.
+        // Placeholder for alignment
         parent.spawn(Node {
             width: Val::Px(125.0),
             ..default()
         });
 
-        // Add each global color grading option button.
+        // 🎨 Global adjustment buttons
         for option in [
-            SelectedGlobalColorGradingOption::Exposure,
-            SelectedGlobalColorGradingOption::Temperature,
-            SelectedGlobalColorGradingOption::Tint,
-            SelectedGlobalColorGradingOption::Hue,
+            SelectedGlobalColorGradingOption::Exposure,     // Overall brightness
+            SelectedGlobalColorGradingOption::Temperature,  // Warm/cool balance
+            SelectedGlobalColorGradingOption::Tint,        // Green/magenta balance
+            SelectedGlobalColorGradingOption::Hue,         // Color wheel rotation
         ] {
             add_button_for_value(
                 parent,
@@ -193,34 +225,36 @@ fn add_buttons_for_global_controls(
     });
 }
 
-/// Adds the buttons that control color grading for individual sections
-/// (highlights, midtones, shadows).
+// 🎭 Section Controls: Targeted Adjustments
+//
+// These let you adjust specific brightness ranges independently.
+// It's like having separate controls for the bright sky, the mid-tone skin,
+// and the dark shadows in a portrait!
 fn add_buttons_for_section(
     parent: &mut ChildSpawnerCommands,
     section: SelectedColorGradingSection,
     color_grading: &ColorGrading,
     font: &Handle<Font>,
 ) {
-    // Spawn the row container.
     parent
         .spawn(Node {
             align_items: AlignItems::Center,
             ..default()
         })
         .with_children(|parent| {
-            // Spawn the label ("Highlights", etc.)
+            // 🏷️ Section label
             add_text(parent, &section.to_string(), font, Color::WHITE).insert(Node {
                 width: Val::Px(125.0),
                 ..default()
             });
 
-            // Spawn the buttons.
+            // 🎚️ Section-specific controls
             for option in [
-                SelectedSectionColorGradingOption::Saturation,
-                SelectedSectionColorGradingOption::Contrast,
-                SelectedSectionColorGradingOption::Gamma,
-                SelectedSectionColorGradingOption::Gain,
-                SelectedSectionColorGradingOption::Lift,
+                SelectedSectionColorGradingOption::Saturation,  // Color intensity
+                SelectedSectionColorGradingOption::Contrast,    // Light/dark difference
+                SelectedSectionColorGradingOption::Gamma,       // Midtone brightness
+                SelectedSectionColorGradingOption::Gain,        // Multiply brightness
+                SelectedSectionColorGradingOption::Lift,        // Add brightness
             ] {
                 add_button_for_value(
                     parent,
@@ -232,14 +266,15 @@ fn add_buttons_for_section(
         });
 }
 
-/// Adds a button that controls one of the color grading values.
+// 🔘 Individual Button Creation
+//
+// Each button shows both the parameter name and its current value
 fn add_button_for_value(
     parent: &mut ChildSpawnerCommands,
     option: SelectedColorGradingOption,
     color_grading: &ColorGrading,
     font: &Handle<Font>,
 ) {
-    // Add the button node.
     parent
         .spawn((
             Button,
@@ -261,7 +296,7 @@ fn add_button_for_value(
             option,
         })
         .with_children(|parent| {
-            // Add the button label.
+            // 📝 Button label
             let label = match option {
                 SelectedColorGradingOption::Global(option) => option.to_string(),
                 SelectedColorGradingOption::Section(_, option) => option.to_string(),
@@ -271,13 +306,13 @@ fn add_button_for_value(
                 option,
             });
 
-            // Add a spacer.
+            // Spacer
             parent.spawn(Node {
                 flex_grow: 1.0,
                 ..default()
             });
 
-            // Add the value text.
+            // 🔢 Current value display
             add_text(
                 parent,
                 &format!("{:.3}", option.get(color_grading)),
@@ -291,7 +326,7 @@ fn add_button_for_value(
         });
 }
 
-/// Creates the help text at the top of the screen.
+// 💬 Help Text Creation
 fn add_help_text(
     commands: &mut Commands,
     font: &Handle<Font>,
@@ -313,7 +348,7 @@ fn add_help_text(
     ));
 }
 
-/// Adds some text to the scene.
+// 📝 Text Helper Function
 fn add_text<'a>(
     parent: &'a mut ChildSpawnerCommands,
     label: &str,
@@ -331,12 +366,14 @@ fn add_text<'a>(
     ))
 }
 
+// 📷 Camera Setup with Color Grading
 fn add_camera(commands: &mut Commands, asset_server: &AssetServer, color_grading: ColorGrading) {
     commands.spawn((
         Camera3d::default(),
-        Hdr,
+        Hdr,  // High Dynamic Range for better color grading
         Transform::from_xyz(0.7, 0.7, 1.0).looking_at(Vec3::new(0.0, 0.3, 0.0), Vec3::Y),
-        color_grading,
+        color_grading,  // 🎨 The magic happens here!
+        // 🌫️ Fog adds depth
         DistanceFog {
             color: Color::srgb_u8(43, 44, 47),
             falloff: FogFalloff::Linear {
@@ -345,6 +382,7 @@ fn add_camera(commands: &mut Commands, asset_server: &AssetServer, color_grading
             },
             ..default()
         },
+        // 🌍 Environment lighting
         EnvironmentMapLight {
             diffuse_map: asset_server.load("environment_maps/pisa_diffuse_rgb9e5_zstd.ktx2"),
             specular_map: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
@@ -354,13 +392,14 @@ fn add_camera(commands: &mut Commands, asset_server: &AssetServer, color_grading
     ));
 }
 
+// 🎬 Scene Setup: Our Test Environment
 fn add_basic_scene(commands: &mut Commands, asset_server: &AssetServer) {
-    // Spawn the main scene.
+    // 🎯 Tone mapping test scene - perfect for color grading experiments
     commands.spawn(SceneRoot(asset_server.load(
         GltfAssetLabel::Scene(0).from_asset("models/TonemappingTest/TonemappingTest.gltf"),
     )));
 
-    // Spawn the flight helmet.
+    // 🚁 Flight helmet for detail testing
     commands.spawn((
         SceneRoot(
             asset_server
@@ -369,7 +408,7 @@ fn add_basic_scene(commands: &mut Commands, asset_server: &AssetServer) {
         Transform::from_xyz(0.5, 0.0, -0.5).with_rotation(Quat::from_rotation_y(-0.15 * PI)),
     ));
 
-    // Spawn the light.
+    // ☀️ Directional light
     commands.spawn((
         DirectionalLight {
             illuminance: 15000.0,
@@ -386,6 +425,7 @@ fn add_basic_scene(commands: &mut Commands, asset_server: &AssetServer) {
     ));
 }
 
+// 🎨 Display implementations for UI labels
 impl Display for SelectedGlobalColorGradingOption {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let name = match *self {
@@ -433,6 +473,7 @@ impl Display for SelectedColorGradingOption {
     }
 }
 
+// 📊 Value Getters and Setters
 impl SelectedSectionColorGradingOption {
     /// Returns the appropriate value in the given color grading section.
     fn get(&self, section: &ColorGradingSection) -> f32 {
@@ -457,8 +498,6 @@ impl SelectedSectionColorGradingOption {
 }
 
 impl SelectedGlobalColorGradingOption {
-    /// Returns the appropriate value in the given set of global color grading
-    /// values.
     fn get(&self, global: &ColorGradingGlobal) -> f32 {
         match *self {
             SelectedGlobalColorGradingOption::Exposure => global.exposure,
@@ -468,8 +507,6 @@ impl SelectedGlobalColorGradingOption {
         }
     }
 
-    /// Sets the appropriate value in the given set of global color grading
-    /// values.
     fn set(&self, global: &mut ColorGradingGlobal, value: f32) {
         match *self {
             SelectedGlobalColorGradingOption::Exposure => global.exposure = value,
@@ -481,7 +518,6 @@ impl SelectedGlobalColorGradingOption {
 }
 
 impl SelectedColorGradingOption {
-    /// Returns the appropriate value in the given set of color grading values.
     fn get(&self, color_grading: &ColorGrading) -> f32 {
         match self {
             SelectedColorGradingOption::Global(option) => option.get(&color_grading.global),
@@ -498,7 +534,6 @@ impl SelectedColorGradingOption {
         }
     }
 
-    /// Sets the appropriate value in the given set of color grading values.
     fn set(&self, color_grading: &mut ColorGrading, value: f32) {
         match self {
             SelectedColorGradingOption::Global(option) => {
@@ -518,7 +553,7 @@ impl SelectedColorGradingOption {
     }
 }
 
-/// Handles mouse clicks on the buttons when the user clicks on a new one.
+// 🖱️ Button Click Handler
 fn handle_button_presses(
     mut interactions: Query<(&Interaction, &ColorGradingOptionWidget), Changed<Interaction>>,
     mut currently_selected_option: ResMut<SelectedColorGradingOption>,
@@ -532,7 +567,9 @@ fn handle_button_presses(
     }
 }
 
-/// Updates the state of the UI based on the current state.
+// 🎨 UI State Update System
+//
+// Updates button appearance and values based on current selection
 fn update_ui_state(
     mut buttons: Query<(
         &mut BackgroundColor,
@@ -550,7 +587,7 @@ fn update_ui_state(
         return;
     }
 
-    // The currently-selected option is drawn with inverted colors.
+    // 🎨 Update button colors - selected button gets inverted colors
     for (mut background, mut border_color, widget) in buttons.iter_mut() {
         if *currently_selected_option == widget.option {
             *background = Color::WHITE.into();
@@ -563,10 +600,9 @@ fn update_ui_state(
 
     let value_label = format!("{:.3}", currently_selected_option.get(cameras.as_ref()));
 
-    // Update the buttons.
+    // 📝 Update button text
     for (entity, widget) in button_text.iter() {
-        // Set the text color.
-
+        // Set text color based on selection
         let color = if *currently_selected_option == widget.option {
             Color::BLACK
         } else {
@@ -577,7 +613,7 @@ fn update_ui_state(
             text_color.0 = color;
         });
 
-        // Update the displayed value, if this is the currently-selected option.
+        // Update value display for selected option
         if widget.widget_type == ColorGradingOptionWidgetType::Value
             && *currently_selected_option == widget.option
         {
@@ -587,17 +623,17 @@ fn update_ui_state(
         }
     }
 
-    // Update the help text.
+    // Update help text
     *writer.text(*help_text, 0) = create_help_text(&currently_selected_option);
 }
 
-/// Creates the help text at the top left of the window.
 fn create_help_text(currently_selected_option: &SelectedColorGradingOption) -> String {
     format!("Press Left/Right to adjust {currently_selected_option}")
 }
 
-/// Processes keyboard input to change the value of the currently-selected color
-/// grading option.
+// ⌨️ Keyboard Input Handler
+//
+// Adjusts the selected color grading value based on arrow key input
 fn adjust_color_grading_option(
     mut color_grading: Single<&mut ColorGrading>,
     input: Res<ButtonInput<KeyCode>>,
@@ -616,3 +652,44 @@ fn adjust_color_grading_option(
         currently_selected_option.set(&mut color_grading, new_value);
     }
 }
+
+// 🎓 Deep Dive: Understanding Color Grading Parameters
+//
+// **Global Parameters** (affect entire image):
+// - Exposure: Overall brightness (-10 to 10, 0 = neutral)
+// - Temperature: Blue/orange balance (-1 to 1, 0 = neutral)
+// - Tint: Green/magenta balance (-1 to 1, 0 = neutral)
+// - Hue: Rotates all colors on the color wheel (-PI to PI)
+//
+// **Section Parameters** (affect brightness ranges):
+// - Saturation: Color intensity (0 = grayscale, 1 = normal, >1 = vivid)
+// - Contrast: Difference between lights and darks (1 = normal)
+// - Gamma: Midtone brightness (1 = normal, <1 = darker, >1 = lighter)
+// - Gain: Multiplies brightness (1 = normal)
+// - Lift: Adds brightness (0 = normal)
+//
+// **The Three-Way Split**:
+// - Shadows: Darkest 1/3 of the image
+// - Midtones: Middle 1/3 of the image
+// - Highlights: Brightest 1/3 of the image
+//
+// This separation allows targeted adjustments - you can warm up
+// skin tones (midtones) while keeping shadows cool and moody!
+
+// 💡 Artistic Tips:
+//
+// **Cinematic Looks**:
+// - Teal & Orange: Cool shadows (negative temperature), warm highlights
+// - Film Noir: Low saturation, high contrast, lifted shadows
+// - Vintage: Warm temperature, lifted shadows, reduced contrast
+//
+// **Common Techniques**:
+// - Day for Night: Reduce exposure, add blue temperature, increase contrast
+// - Golden Hour: Warm temperature, slight magenta tint, soft contrast
+// - Bleach Bypass: Desaturate, increase contrast, cool temperature
+//
+// **Professional Workflow**:
+// 1. Set exposure first (overall brightness)
+// 2. Adjust temperature/tint for white balance
+// 3. Fine-tune with section controls
+// 4. Add creative color shifts with hue

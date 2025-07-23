@@ -1,40 +1,4 @@
-//! [Extended colors from the CSS4 specification](https://en.wikipedia.org/wiki/Web_colors#Extended_colors),
-//! Also known as X11 colors, which were standardized in HTML 4.0.
-
-use crate::Srgba;
-
-/// <div style="background-color: #000000; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const BLACK: Srgba = Srgba::rgb(0.0, 0.0, 0.0);
-/// <div style="background-color: #0000FF; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const BLUE: Srgba = Srgba::rgb(0.0, 0.0, 1.0);
-/// <div style="background-color: #FF00FF; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const FUCHSIA: Srgba = Srgba::rgb(1.0, 0.0, 1.0);
-/// <div style="background-color: #808080; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const GRAY: Srgba = Srgba::rgb(0.5019608, 0.5019608, 0.5019608);
-/// <div style="background-color: #008000; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const GREEN: Srgba = Srgba::rgb(0.0, 0.5019608, 0.0);
-/// <div style="background-color: #00FF00; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const LIME: Srgba = Srgba::rgb(0.0, 1.0, 0.0);
-/// <div style="background-color: #800000; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const MAROON: Srgba = Srgba::rgb(0.5019608, 0.0, 0.0);
-/// <div style="background-color: #000080; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const NAVY: Srgba = Srgba::rgb(0.0, 0.0, 0.5019608);
-/// <div style="background-color: #808000; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const OLIVE: Srgba = Srgba::rgb(0.5019608, 0.5019608, 0.0);
-/// <div style="background-color: #800080; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const PURPLE: Srgba = Srgba::rgb(0.5019608, 0.0, 0.5019608);
-/// <div style="background-color: #FF0000; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const RED: Srgba = Srgba::rgb(1.0, 0.0, 0.0);
-/// <div style="background-color: #C0C0C0; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const SILVER: Srgba = Srgba::rgb(0.7529412, 0.7529412, 0.7529412);
-/// <div style="background-color: #008080; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const TEAL: Srgba = Srgba::rgb(0.0, 0.5019608, 0.5019608);
-/// <div style="background-color: #FFFFFF; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const WHITE: Srgba = Srgba::rgb(1.0, 1.0, 1.0);
-/// <div style="background-color: #FFFF00; width: 10px; padding: 10px; border: 1px solid;"></div>
-pub const YELLOW: Srgba = Srgba::rgb(1.0, 1.0, 0.0);
 /// <div style="background-color:rgb(94.1%, 97.3%, 100.0%); width: 10px; padding: 10px; border: 1px solid;"></div>
-///
 pub const ALICE_BLUE: Srgba = Srgba::new(0.941, 0.973, 1.0, 1.0);
 // Hex: #F0F8FF
 pub const ANTIQUE_WHITE: Srgba = Srgba::new(0.98, 0.922, 0.843, 1.0);

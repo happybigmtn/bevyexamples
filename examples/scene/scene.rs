@@ -23,6 +23,10 @@
 //! utilizes a thread pool (`IoTaskPool`) to avoid stalling the main thread. This
 //! won't work on WASM because WASM typically doesn't have direct filesystem access.
 //!
+//! Scenes are like save files for your game world - they capture a snapshot of entities,
+//! components, and resources that you can reload later. Think of them as freeze-dried
+//! game states: just add Bevy and they spring back to life! Perfect for level editors,
+//! save games, or any data-driven content.
 
 use bevy::{asset::LoadState, prelude::*, tasks::IoTaskPool};
 use core::time::Duration;
@@ -35,14 +39,23 @@ use std::{fs::File, io::Write};
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        // REGISTER TYPES FOR REFLECTION
+        // This tells Bevy how to serialize/deserialize our custom types
         .register_type::<ComponentA>()
         .register_type::<ComponentB>()
         .register_type::<ResourceA>()
         .add_systems(
             Startup,
-            (save_scene_system, load_scene_system, infotext_system),
+            (
+                save_scene_system,    // Creates and saves a new scene
+                load_scene_system,    // Loads existing scene from file
+                infotext_system,      // UI message
+            ),
         )
-        .add_systems(Update, (log_system, panic_on_fail))
+        .add_systems(Update, (
+            log_system,      // Monitor component changes
+            panic_on_fail    // Error handling for CI
+        ))
         .run();
 }
 
@@ -54,89 +67,75 @@ fn main() {
 /// and we add component-specific reflection by using `#[reflect(Component)]`.
 /// We also illustrate how to skip serializing fields and how `FromWorld` can help
 /// create runtime-initialized data.
-///
-/// A sample component that is fully serializable.
-///
-/// This component has public `x` and `y` fields that will be included in
-/// the scene files. Notice how it derives `Default`, `Reflect`, and declares
-/// itself as a reflected component with `#[reflect(Component)]`.
+
+// SIMPLE COMPONENT - Everything gets saved
 #[derive(Component, Reflect, Default)]
-#[reflect(Component)] // this tells the reflect derive to also reflect component behaviors
+#[reflect(Component)] // Magic attribute that makes components scene-compatible!
 struct ComponentA {
-    /// An example `f32` field
+    /// Position-like data that will be saved in scenes
     pub x: f32,
-    /// Another example `f32` field
     pub y: f32,
 }
 
-/// A sample component that includes both serializable and non-serializable fields.
-///
-/// This is useful for skipping serialization of runtime data or fields you
-/// don't want written to scene files.
+// ADVANCED COMPONENT - Mix of saved and runtime data
 #[derive(Component, Reflect)]
 #[reflect(Component)]
 struct ComponentB {
-    /// A string field that will be serialized.
+    /// This gets saved to the scene file
     pub value: String,
-    /// A `Duration` field that should never be serialized to the scene file, so we skip it.
+    
+    /// This is runtime-only data - NOT saved!
+    /// Perfect for timestamps, temp values, or computed data
     #[reflect(skip_serializing)]
     pub _time_since_startup: Duration,
 }
 
-/// This implements `FromWorld` for `ComponentB`, letting us initialize runtime fields
-/// by accessing the current ECS resources. In this case, we acquire the `Time` resource
-/// and store the current elapsed time.
+// FromWorld - Initialize component using world data
+// This runs when deserializing from scenes!
 impl FromWorld for ComponentB {
     fn from_world(world: &mut World) -> Self {
+        // Access resources during initialization
         let time = world.resource::<Time>();
         ComponentB {
+            // Runtime field gets current time
             _time_since_startup: time.elapsed(),
+            // Serialized field gets default
             value: "Default Value".to_string(),
         }
     }
 }
 
-/// A simple resource that also derives `Reflect`, allowing it to be stored in scenes.
-///
-/// Just like a component, you can skip serializing fields or implement `FromWorld` if needed.
+// RESOURCES IN SCENES - Yes, you can save resources too!
 #[derive(Resource, Reflect, Default)]
-#[reflect(Resource)]
+#[reflect(Resource)]  // Makes resources scene-compatible
 struct ResourceA {
-    /// This resource tracks a `score` value.
+    /// Game state that persists across scene loads
     pub score: u32,
 }
 
 /// # Scene File Paths
-///
-/// `SCENE_FILE_PATH` points to the original scene file that we'll be loading.
-/// `NEW_SCENE_FILE_PATH` points to the new scene file that we'll be creating
-/// (and demonstrating how to serialize to disk).
-///
-/// The initial scene file will be loaded below and not change when the scene is saved.
+
+/// Original scene we'll load - check this file to see the RON format!
 const SCENE_FILE_PATH: &str = "scenes/load_scene_example.scn.ron";
 
-/// The new, updated scene data will be saved here so that you can see the changes.
+/// Where we'll save our programmatically created scene
 const NEW_SCENE_FILE_PATH: &str = "scenes/load_scene_example-new.scn.ron";
 
 /// Loads a scene from an asset file and spawns it in the current world.
 ///
-/// Spawning a `DynamicSceneRoot` creates a new parent entity, which then spawns new
-/// instances of the scene's entities as its children. If you modify the
-/// `SCENE_FILE_PATH` scene file, or if you enable file watching, you can see
-/// changes reflected immediately.
+/// DynamicSceneRoot is like a scene player - it creates entities from the scene file
 fn load_scene_system(mut commands: Commands, asset_server: Res<AssetServer>) {
+    // One line to load and spawn an entire scene!
+    // The scene file contains serialized entities and components
     commands.spawn(DynamicSceneRoot(asset_server.load(SCENE_FILE_PATH)));
 }
 
-/// Logs changes made to `ComponentA` entities, and also checks whether `ResourceA`
-/// has been recently added.
-///
-/// Any time a `ComponentA` is modified, that change will appear here. This system
-/// demonstrates how you might detect and handle scene updates at runtime.
+/// Monitors scene loading - shows when components are added or changed
 fn log_system(
     query: Query<(Entity, &ComponentA), Changed<ComponentA>>,
     res: Option<Res<ResourceA>>,
 ) {
+    // Log any ComponentA changes (happens when scene loads!)
     for (entity, component_a) in &query {
         info!("  Entity({})", entity.index());
         info!(
@@ -144,6 +143,8 @@ fn log_system(
             component_a.x, component_a.y
         );
     }
+    
+    // Check if ResourceA was just loaded from the scene
     if let Some(res) = res {
         if res.is_added() {
             info!("  New ResourceA: {{ score: {} }}\n", res.score);
@@ -151,52 +152,47 @@ fn log_system(
     }
 }
 
-/// Demonstrates how to create a new scene from scratch, populate it with data,
-/// and then serialize it to a file. The new file is written to `NEW_SCENE_FILE_PATH`.
-///
-/// This system creates a fresh world, duplicates the type registry so that our
-/// custom component types are recognized, spawns some sample entities and resources,
-/// and then serializes the resulting dynamic scene.
+/// Creates and saves a new scene programmatically
 fn save_scene_system(world: &mut World) {
-    // Scenes can be created from any ECS World.
-    // You can either create a new one for the scene or use the current World.
-    // For demonstration purposes, we'll create a new one.
+    // STEP 1: Create a mini-world for our scene
+    // Scenes can capture part or all of a world
     let mut scene_world = World::new();
 
-    // The `TypeRegistry` resource contains information about all registered types (including components).
-    // This is used to construct scenes, so we'll want to ensure that our previous type registrations
-    // exist in this new scene world as well.
-    // To do this, we can simply clone the `AppTypeRegistry` resource.
+    // STEP 2: Copy type registry so scene knows our components
+    // Without this, the scene can't serialize our custom types!
     let type_registry = world.resource::<AppTypeRegistry>().clone();
     scene_world.insert_resource(type_registry);
 
+    // STEP 3: Populate the scene world with entities
     let mut component_b = ComponentB::from_world(world);
     component_b.value = "hello".to_string();
+    
+    // Entity with multiple components
     scene_world.spawn((
         component_b,
         ComponentA { x: 1.0, y: 2.0 },
         Transform::IDENTITY,
-        Name::new("joe"),
+        Name::new("joe"),  // Names help identify entities in scene files
     ));
+    
+    // Simple entity with just ComponentA
     scene_world.spawn(ComponentA { x: 3.0, y: 4.0 });
+    
+    // Resources get saved too!
     scene_world.insert_resource(ResourceA { score: 1 });
 
-    // With our sample world ready to go, we can now create our scene using DynamicScene or DynamicSceneBuilder.
-    // For simplicity, we will create our scene using DynamicScene:
+    // STEP 4: Create the actual scene
     let scene = DynamicScene::from_world(&scene_world);
 
-    // Scenes can be serialized like this:
+    // STEP 5: Serialize to RON format (Rusty Object Notation)
     let type_registry = world.resource::<AppTypeRegistry>();
     let type_registry = type_registry.read();
     let serialized_scene = scene.serialize(&type_registry).unwrap();
 
-    // Showing the scene in the console
+    // Show the RON data in console - it's human readable!
     info!("{}", serialized_scene);
 
-    // Writing the scene to a new file. Using a task to avoid calling the filesystem APIs in a system
-    // as they are blocking.
-    //
-    // This can't work in Wasm as there is no filesystem access.
+    // STEP 6: Save to file (async to avoid blocking)
     #[cfg(not(target_arch = "wasm32"))]
     IoTaskPool::get()
         .spawn(async move {
@@ -205,13 +201,10 @@ fn save_scene_system(world: &mut World) {
                 .and_then(|mut file| file.write(serialized_scene.as_bytes()))
                 .expect("Error while writing scene to file");
         })
-        .detach();
+        .detach();  // Fire and forget
 }
 
-/// Spawns a simple 2D camera and some text indicating that the user should
-/// check the console output for scene loading/saving messages.
-///
-/// This system is only necessary for the info message in the UI.
+/// UI setup - just tells user to check console
 fn infotext_system(mut commands: Commands) {
     commands.spawn(Camera2d);
     commands.spawn((
@@ -227,8 +220,7 @@ fn infotext_system(mut commands: Commands) {
     ));
 }
 
-/// To help with Bevy's automated testing, we want the example to close with an appropriate if the
-/// scene fails to load. This is most likely not something you want in your own app.
+/// Error handling for CI testing - you probably don't need this in your game
 fn panic_on_fail(scenes: Query<&DynamicSceneRoot>, asset_server: Res<AssetServer>) {
     for scene in &scenes {
         if let Some(LoadState::Failed(err)) = asset_server.get_load_state(&scene.0) {

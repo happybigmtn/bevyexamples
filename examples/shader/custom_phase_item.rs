@@ -1,76 +1,134 @@
-//! Demonstrates how to enqueue custom draw commands in a render phase.
+//! # Custom Render Phase Items: Deep GPU Pipeline Integration
 //!
-//! This example shows how to use the built-in
-//! [`bevy_render::render_phase::BinnedRenderPhase`] functionality with a
-//! custom [`RenderCommand`] to allow inserting arbitrary GPU drawing logic
-//! into Bevy's pipeline. This is not the only way to add custom rendering code
-//! into Bevy—render nodes are another, lower-level method—but it does allow
-//! for better reuse of parts of Bevy's built-in mesh rendering logic.
+//! This example demonstrates the most advanced level of GPU programming integration with Bevy's
+//! render system: **custom render phase items**. This technique allows you to inject completely
+//! custom GPU draw commands directly into Bevy's optimized rendering pipeline while maintaining
+//! compatibility with Bevy's culling, batching, and sorting systems.
+//!
+//! ## Advanced GPU Programming Concepts:
+//! - **Render Phases**: Ordered stages of GPU commands (e.g., opaque, transparent, UI)
+//! - **Draw Functions**: Parameterized GPU command execution functions
+//! - **Render Pipelines**: Complete GPU state descriptions (shaders, blending, depth testing)
+//! - **Specialized Pipelines**: Runtime compilation of pipelines based on rendering conditions
+//! - **GPU Buffer Management**: Direct control over vertex/index buffer creation and binding
+//! - **Render Command Composition**: Building complex draw operations from smaller components
+//!
+//! ## Why Use Custom Phase Items:
+//! - **Performance**: Integrate with Bevy's optimized culling and sorting systems
+//! - **Flexibility**: Complete control over GPU state while leveraging Bevy infrastructure
+//! - **Composability**: Reuse Bevy's built-in rendering components (lighting, shadows, etc.)
+//! - **Debugging**: Benefit from Bevy's render graph visualization and profiling tools
+//!
+//! ## Alternative Approaches:
+//! - **Custom Materials**: Simpler, for shader-only customizations
+//! - **Render Nodes**: Lower-level, for compute shaders or complete pipeline control
+//! - **Post-Processing**: For screen-space effects
 
 use bevy::{
+    // Core 3D pipeline integration - accessing Bevy's built-in opaque render phase
     core_pipeline::core_3d::{Opaque3d, Opaque3dBatchSetKey, Opaque3dBinKey, CORE_3D_DEPTH_FORMAT},
     ecs::{
+        // Tick: Change detection system for forcing render pipeline updates
         component::Tick,
+        // ROQueryItem: Read-only query items for render commands
         query::ROQueryItem,
+        // System parameter types for render commands
         system::{lifetimeless::SRes, SystemParamItem},
     },
     prelude::*,
     render::{
+        // Component extraction system - moves data from main world to render world
         extract_component::{ExtractComponent, ExtractComponentPlugin},
+        // Axis-aligned bounding box for frustum culling
         primitives::Aabb,
         render_phase::{
+            // Core render phase types for managing GPU draw commands
             AddRenderCommand, BinnedRenderPhaseType, DrawFunctions, InputUniformIndex, PhaseItem,
             RenderCommand, RenderCommandResult, SetItemPipeline, TrackedRenderPass,
             ViewBinnedRenderPhases,
         },
         render_resource::{
+            // GPU resource management - buffers, pipelines, and render state
             BufferUsages, ColorTargetState, ColorWrites, CompareFunction, DepthStencilState,
             FragmentState, IndexFormat, MultisampleState, PipelineCache, PrimitiveState,
             RawBufferVec, RenderPipelineDescriptor, SpecializedRenderPipeline,
             SpecializedRenderPipelines, TextureFormat, VertexAttribute, VertexBufferLayout,
             VertexFormat, VertexState, VertexStepMode,
         },
+        // GPU device and command queue interfaces
         renderer::{RenderDevice, RenderQueue},
+        // View and visibility systems for camera culling
         view::{self, ExtractedView, RenderVisibleEntities, VisibilityClass},
+        // Render app scheduling and systems
         Render, RenderApp, RenderSystems,
     },
 };
+// Bytemuck: Zero-copy casting between Rust types and raw bytes for GPU upload
 use bytemuck::{Pod, Zeroable};
 
-/// A marker component that represents an entity that is to be rendered using
-/// our custom phase item.
+/// Marker component identifying entities that use our custom rendering pipeline.
+/// This demonstrates the **render world extraction pattern** - how data flows from
+/// the main ECS world to the specialized render world that runs on a separate thread.
 ///
-/// Note the [`ExtractComponent`] trait implementation: this is necessary to
-/// tell Bevy that this object should be pulled into the render world. Also note
-/// the `on_add` hook, which is needed to tell Bevy's `check_visibility` system
-/// that entities with this component need to be examined for visibility.
+/// ## Key Concepts:
+/// - **ExtractComponent**: Automatically copies this component from main world to render world
+/// - **VisibilityClass**: Required for Bevy's frustum culling system to work correctly
+/// - **Component Hook**: The `on_add` function registers this entity for visibility testing
+/// 
+/// ## Render World Architecture:
+/// The render world is a parallel ECS world that contains only rendering-related data.
+/// This separation allows the main world to continue game logic while rendering happens.
 #[derive(Clone, Component, ExtractComponent)]
 #[require(VisibilityClass)]
 #[component(on_add = view::add_visibility_class::<CustomRenderedEntity>)]
 struct CustomRenderedEntity;
 
-/// Holds a reference to our shader.
+/// Resource containing our custom shader handle for pipeline specialization.
+/// This demonstrates **lazy shader loading** - shaders are loaded asynchronously
+/// and compiled by the GPU driver when first needed.
 ///
-/// This is loaded at app creation time.
+/// ## Pipeline Specialization Pattern:
+/// Modern graphics APIs require different pipeline objects for different rendering
+/// conditions (MSAA levels, HDR vs SDR, etc.). This resource provides the base
+/// shader that gets specialized at runtime.
 #[derive(Resource)]
 struct CustomPhasePipeline {
     shader: Handle<Shader>,
 }
 
-/// A [`RenderCommand`] that binds the vertex and index buffers and issues the
-/// draw command for our custom phase item.
+/// **Core RenderCommand**: Executes the actual GPU draw call for our custom geometry.
+/// This is where CPU-side preparation meets GPU-side execution. RenderCommands are
+/// designed to be composable, stateless, and fast - they run during the critical
+/// render loop where performance matters most.
+///
+/// ## GPU Command Generation:
+/// RenderCommands translate high-level rendering intent into low-level GPU API calls
+/// like `set_vertex_buffer()`, `set_index_buffer()`, and `draw_indexed()`.
 struct DrawCustomPhaseItem;
 
 impl<P> RenderCommand<P> for DrawCustomPhaseItem
 where
     P: PhaseItem,
 {
+    // System parameters this render command needs access to
+    // SRes = System Resource (render world resource access)
     type Param = SRes<CustomPhaseItemBuffers>;
 
+    // Per-view data this command needs (none in this simple example)
     type ViewQuery = ();
 
+    // Per-entity data this command needs (none in this simple example)  
     type ItemQuery = ();
 
+    /// The critical render function: translates rendering intent to GPU commands.
+    /// This runs during the hot path of the render loop, so performance is crucial.
+    ///
+    /// ## GPU State Machine:
+    /// Modern GPUs are state machines - you configure rendering state (buffers, textures,
+    /// shaders) then issue draw commands. This function demonstrates the typical pattern:
+    /// 1. Bind vertex data (positions, colors, normals, etc.)
+    /// 2. Bind index data (triangle connectivity)  
+    /// 3. Issue indexed draw call (GPU processes triangles)
     fn render<'w>(
         _: &P,
         _: ROQueryItem<'w, Self::ViewQuery>,
@@ -78,110 +136,149 @@ where
         custom_phase_item_buffers: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        // Borrow check workaround.
+        // Extract the buffer resource (Rust borrow checker requirement)
         let custom_phase_item_buffers = custom_phase_item_buffers.into_inner();
 
-        // Tell the GPU where the vertices are.
+        // CRITICAL: Bind vertex buffer to GPU pipeline slot 0
+        // The GPU will read vertex data from this buffer during draw call execution
         pass.set_vertex_buffer(
-            0,
+            0,  // Vertex buffer slot (must match shader layout)
             custom_phase_item_buffers
                 .vertices
                 .buffer()
                 .unwrap()
-                .slice(..),
+                .slice(..),  // Use entire buffer
         );
 
-        // Tell the GPU where the indices are.
+        // CRITICAL: Bind index buffer for indexed drawing
+        // Indices specify which vertices form triangles, enabling vertex reuse
         pass.set_index_buffer(
             custom_phase_item_buffers
                 .indices
                 .buffer()
                 .unwrap()
                 .slice(..),
-            0,
-            IndexFormat::Uint32,
+            0,  // Byte offset into index buffer
+            IndexFormat::Uint32,  // Each index is a 32-bit unsigned integer
         );
 
-        // Draw one triangle (3 vertices).
+        // CRITICAL: Issue the actual draw call to the GPU
+        // draw_indexed(indices, base_vertex, instances)
+        // - 0..3: Draw indices 0, 1, 2 (one triangle)
+        // - 0: Base vertex offset
+        // - 0..1: Draw one instance of this geometry
         pass.draw_indexed(0..3, 0, 0..1);
 
         RenderCommandResult::Success
     }
 }
 
-/// The GPU vertex and index buffers for our custom phase item.
-///
-/// As the custom phase item is a single triangle, these are uploaded once and
-/// then left alone.
+/// **GPU Buffer Management**: Contains the actual geometry data uploaded to GPU memory.
+/// This demonstrates **static geometry** - data uploaded once and reused many times.
+/// 
+/// ## GPU Memory Architecture:
+/// - **GPU Memory**: Separate from CPU RAM, optimized for parallel access
+/// - **Buffer Types**: Different usage patterns (vertex data, index data, uniform data)
+/// - **Memory Layout**: Data must be properly aligned for GPU hardware requirements
 #[derive(Resource)]
 struct CustomPhaseItemBuffers {
-    /// The vertices for the single triangle.
-    ///
-    /// This is a [`RawBufferVec`] because that's the simplest and fastest type
-    /// of GPU buffer, and [`Vertex`] objects are simple.
+    /// Vertex buffer containing position and color data for our triangle.
+    /// RawBufferVec provides efficient GPU buffer management with minimal overhead.
+    /// It handles the complex details of GPU memory allocation and synchronization.
     vertices: RawBufferVec<Vertex>,
 
-    /// The indices of the single triangle.
-    ///
-    /// As above, this is a [`RawBufferVec`] because `u32` values have trivial
-    /// size and alignment.
+    /// Index buffer defining triangle connectivity (which vertices form triangles).
+    /// Using indices allows vertex reuse - multiple triangles can share vertices,
+    /// reducing memory usage and improving cache performance.
     indices: RawBufferVec<u32>,
 }
 
-/// The CPU-side structure that describes a single vertex of the triangle.
+/// **Vertex Data Structure**: Represents a single vertex with GPU-compatible memory layout.
+/// This demonstrates critical concepts for CPU-GPU data transfer.
+///
+/// ## Memory Layout Requirements:
+/// - **#[repr(C)]**: Forces C-style memory layout for predictable GPU compatibility
+/// - **Pod + Zeroable**: Bytemuck traits allowing safe zero-copy transfer to GPU
+/// - **Explicit Padding**: GPU hardware often requires 16-byte alignment for vector types
+/// - **Field Ordering**: Matches the vertex shader's expected input layout
 #[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 struct Vertex {
-    /// The 3D position of the triangle vertex.
+    /// 3D world-space position (x, y, z coordinates)
     position: Vec3,
-    /// Padding.
+    /// Manual padding to ensure proper GPU memory alignment (Vec3 + u32 = 16 bytes)
     pad0: u32,
-    /// The color of the triangle vertex.
+    /// RGB color values (red, green, blue) - each component 0.0 to 1.0
     color: Vec3,
-    /// Padding.
+    /// Additional padding for consistent 32-byte vertex size
     pad1: u32,
 }
 
 impl Vertex {
-    /// Creates a new vertex structure.
+    /// Constructs a new vertex with proper padding for GPU memory layout.
+    /// The const fn allows compile-time initialization of static vertex data.
     const fn new(position: Vec3, color: Vec3) -> Vertex {
         Vertex {
             position,
             color,
+            // Zero-initialize padding fields - critical for deterministic GPU behavior
             pad0: 0,
             pad1: 0,
         }
     }
 }
 
-/// The custom draw commands that Bevy executes for each entity we enqueue into
-/// the render phase.
+/// **Composable Render Commands**: Defines the sequence of GPU operations for our custom item.
+/// This demonstrates Bevy's **command composition pattern** - complex rendering operations
+/// built from smaller, reusable components.
+///
+/// ## Command Sequence:
+/// 1. **SetItemPipeline**: Binds the render pipeline (shaders, blend state, etc.)
+/// 2. **DrawCustomPhaseItem**: Binds buffers and issues the draw call
+///
+/// Commands execute in order, building up GPU state before the final draw operation.
 type DrawCustomPhaseItemCommands = (SetItemPipeline, DrawCustomPhaseItem);
 
-/// A single triangle's worth of vertices, for demonstration purposes.
+/// **Static Geometry Data**: An equilateral triangle with per-vertex colors.
+/// This demonstrates **compile-time vertex data** and basic 3D coordinate math.
+///
+/// ## Triangle Geometry:
+/// - **Equilateral Triangle**: All sides equal length, centered at origin
+/// - **Color Gradient**: Red (bottom-left) → Green (bottom-right) → Blue (top)
+/// - **Z-Position**: 0.5 units forward from origin for visibility
 static VERTICES: [Vertex; 3] = [
+    // Bottom-left vertex: Red color
     Vertex::new(vec3(-0.866, -0.5, 0.5), vec3(1.0, 0.0, 0.0)),
+    // Bottom-right vertex: Green color  
     Vertex::new(vec3(0.866, -0.5, 0.5), vec3(0.0, 1.0, 0.0)),
+    // Top vertex: Blue color
     Vertex::new(vec3(0.0, 1.0, 0.5), vec3(0.0, 0.0, 1.0)),
 ];
 
-/// The entry point.
+/// Application entry point demonstrating the **dual-world architecture** of Bevy rendering.
+/// This shows how to properly set up systems in both the main world and render world.
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
+        // CRITICAL: Register component extraction from main world to render world
         .add_plugins(ExtractComponentPlugin::<CustomRenderedEntity>::default())
         .add_systems(Startup, setup);
 
-    // We make sure to add these to the render app, not the main app.
+    // CRITICAL: Render-specific setup must happen in the RenderApp, not the main App
+    // The RenderApp is a separate ECS world that runs rendering systems on a different thread
     app.get_sub_app_mut(RenderApp)
         .unwrap()
+        // Initialize render pipeline resources
         .init_resource::<CustomPhasePipeline>()
         .init_resource::<SpecializedRenderPipelines<CustomPhasePipeline>>()
+        // Register our custom draw commands with the opaque render phase
         .add_render_command::<Opaque3d, DrawCustomPhaseItemCommands>()
+        // Prepare phase: Set up GPU buffers before rendering
         .add_systems(
             Render,
             prepare_custom_phase_item_buffers.in_set(RenderSystems::Prepare),
         )
+        // Queue phase: Enqueue render items into render phases  
         .add_systems(Render, queue_custom_phase_item.in_set(RenderSystems::Queue));
 
     app.run();

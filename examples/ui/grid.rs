@@ -5,6 +5,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
+                // Fixed window size for consistent layout demo
                 resolution: [800., 600.].into(),
                 title: "Bevy CSS Grid Layout Example".to_string(),
                 ..default()

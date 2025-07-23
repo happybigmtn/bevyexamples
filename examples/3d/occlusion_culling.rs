@@ -4,76 +4,117 @@
 //! origin. At all times, the large cube will be occluding several of the small
 //! cubes. The demo displays the number of cubes that were actually rendered, so
 //! the effects of occlusion culling can be seen.
+//!
+//! # What is Occlusion Culling?
+//!
+//! Occlusion culling is a GPU optimization that skips drawing objects hidden
+//! behind other objects. Think of it like this: if you're standing behind a
+//! wall, there's no point drawing you - the wall blocks the view!
+//!
+//! # How Does It Work?
+//!
+//! 1. **Depth Prepass**: First, render all objects' depth (distance from camera)
+//! 2. **Occlusion Test**: For each object, check if it's behind something else
+//! 3. **Conditional Render**: Only draw objects that passed the test
+//!
+//! # GPU-Driven Rendering
+//!
+//! This example uses advanced GPU features:
+//! - **Indirect Drawing**: GPU decides what to draw without CPU involvement
+//! - **GPU Culling**: Tests happen entirely on the GPU
+//! - **Multi Draw Indirect**: Draw many objects with a single command
+//!
+//! # Performance Benefits
+//!
+//! - Reduces pixel shading work (most expensive part)
+//! - Saves memory bandwidth
+//! - Enables rendering massive scenes
+//! - Essential for open world games
+//!
+//! Press SPACE to toggle occlusion culling and see the difference!
 
 use std::{
-    any::TypeId,
+    any::TypeId,        // For type identification in render phases
     f32::consts::PI,
-    fmt::Write as _,
+    fmt::Write as _,    // For string formatting
     result::Result,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, // Thread-safe shared data between CPU and GPU
 };
 
 use bevy::{
     color::palettes::css::{SILVER, WHITE},
     core_pipeline::{
         core_3d::{
-            graph::{Core3d, Node3d},
-            Opaque3d,
+            graph::{Core3d, Node3d}, // 3D render graph nodes
+            Opaque3d,                // The opaque rendering phase
         },
-        prepass::DepthPrepass,
+        prepass::DepthPrepass, // Renders depth before main pass
     },
     pbr::PbrPlugin,
     prelude::*,
     render::{
         batching::gpu_preprocessing::{
-            GpuPreprocessingMode, GpuPreprocessingSupport, IndirectParametersBuffers,
-            IndirectParametersIndexed,
+            GpuPreprocessingMode,     // GPU culling modes
+            GpuPreprocessingSupport,  // Platform capabilities
+            IndirectParametersBuffers, // GPU buffers for indirect drawing
+            IndirectParametersIndexed, // Draw command parameters
         },
-        experimental::occlusion_culling::OcclusionCulling,
+        experimental::occlusion_culling::OcclusionCulling, // The star of the show!
         render_graph::{self, NodeRunError, RenderGraphApp, RenderGraphContext, RenderLabel},
         render_resource::{Buffer, BufferDescriptor, BufferUsages, MapMode},
         renderer::{RenderContext, RenderDevice},
-        settings::WgpuFeatures,
+        settings::WgpuFeatures, // GPU feature flags
         Render, RenderApp, RenderDebugFlags, RenderPlugin, RenderSystems,
     },
 };
-use bytemuck::Pod;
+use bytemuck::Pod; // Trait for GPU-compatible data types
 
 /// The radius of the spinning sphere of cubes.
 const OUTER_RADIUS: f32 = 3.0;
 
 /// The density of cubes in the other sphere.
+/// Higher values create more cubes (and more occlusion opportunities)
 const OUTER_SUBDIVISION_COUNT: u32 = 5;
 
 /// The speed at which the outer sphere and large cube rotate in radians per
-/// frame.
+/// frame. 0.01 radians ≈ 0.57 degrees per frame
 const ROTATION_SPEED: f32 = 0.01;
 
 /// The length of each side of the small cubes, in meters.
 const SMALL_CUBE_SIZE: f32 = 0.1;
 
 /// The length of each side of the large cube, in meters.
+/// This is the occluder - it blocks the view of small cubes behind it
 const LARGE_CUBE_SIZE: f32 = 2.0;
 
 /// A marker component for the immediate parent of the large sphere of cubes.
+/// We rotate this parent entity to make all small cubes orbit
 #[derive(Default, Component)]
 struct SphereParent;
 
 /// A marker component for the large spinning cube at the origin.
+/// This is our occluder - it hides cubes behind it
 #[derive(Default, Component)]
 struct LargeCube;
 
 /// A plugin for the render app that reads the number of culled meshes from the
 /// GPU back to the CPU.
+/// 
+/// This is complex because GPU and CPU run asynchronously - we need special
+/// synchronization to read GPU data
 struct ReadbackIndirectParametersPlugin;
 
 /// The node that we insert into the render graph in order to read the number of
 /// culled meshes from the GPU back to the CPU.
+/// 
+/// Render graph nodes are execution units in Bevy's rendering pipeline
 #[derive(Default)]
 struct ReadbackIndirectParametersNode;
 
 /// The [`RenderLabel`] that we use to identify the
 /// [`ReadbackIndirectParametersNode`].
+/// 
+/// Labels let us specify execution order in the render graph
 #[derive(Clone, PartialEq, Eq, Hash, Debug, RenderLabel)]
 struct ReadbackIndirectParameters;
 
@@ -87,16 +128,24 @@ struct ReadbackIndirectParameters;
 /// CPU directly. Instead, we have to copy them to a temporary staging buffer
 /// first, and then read *those* buffers back from the GPU to the CPU. This
 /// resource holds those temporary buffers.
+///
+/// Think of it like this:
+/// 1. GPU has data in "GPU-only" memory (fast for GPU, inaccessible to CPU)
+/// 2. We copy to "staging" memory (accessible to both)
+/// 3. CPU can then read from staging memory
 #[derive(Resource, Default)]
 struct IndirectParametersStagingBuffers {
     /// The buffer that stores the indirect draw commands.
     ///
-    /// See [`IndirectParametersIndexed`] for more information about the memory
-    /// layout of this buffer.
+    /// Each command contains:
+    /// - How many vertices to draw
+    /// - How many instances to draw
+    /// - Starting offsets
     data: Option<Buffer>,
     /// The buffer that stores the *number* of indirect draw commands.
     ///
     /// We only care about the first `u32` in this buffer.
+    /// This tells us how many objects survived culling!
     batch_sets: Option<Buffer>,
 }
 
@@ -110,6 +159,11 @@ struct IndirectParametersStagingBuffers {
 /// we don't require more precise synchronization than the lock because we don't
 /// really care how up-to-date the counter of culled meshes is. If it's off by a
 /// few frames, that's no big deal.
+///
+/// Thread safety explained:
+/// - Arc<T> = Atomic Reference Counting (shared ownership across threads)
+/// - Mutex<T> = Mutual Exclusion (only one thread can access at a time)
+/// - Together they provide safe shared mutable state
 #[derive(Clone, Resource, Deref, DerefMut)]
 struct SavedIndirectParameters(Arc<Mutex<SavedIndirectParametersData>>);
 
@@ -118,15 +172,17 @@ struct SavedIndirectParameters(Arc<Mutex<SavedIndirectParametersData>>);
 /// This is needed so that we can display the number of meshes that were culled.
 struct SavedIndirectParametersData {
     /// The CPU-side copy of the GPU buffer that stores the indirect draw
-    /// parameters.
+    /// parameters. Each entry represents a mesh that passed occlusion testing
     data: Vec<IndirectParametersIndexed>,
     /// The CPU-side copy of the GPU buffer that stores the *number* of indirect
     /// draw parameters that we have.
     ///
     /// All we care about is the number of indirect draw parameters for a single
     /// view, so this is only one word in size.
+    /// This is our "meshes rendered" counter!
     count: u32,
     /// True if occlusion culling is supported at all; false if it's not.
+    /// Some older GPUs don't support the required features
     occlusion_culling_supported: bool,
     /// True if we support inspecting the number of meshes that were culled on
     /// this platform; false if we don't.
@@ -135,6 +191,8 @@ struct SavedIndirectParametersData {
     /// employ a more complicated approach in order to determine the number of
     /// meshes that are occluded, and that would be out of scope for this
     /// example.
+    /// 
+    /// This feature lets the GPU write how many draws it's doing
     occlusion_culling_introspection_supported: bool,
 }
 
@@ -152,6 +210,8 @@ impl FromWorld for SavedIndirectParameters {
             // supports `multi_draw_indirect_count`. So, if we don't have that
             // feature, then we don't bother to display how many meshes were
             // culled.
+            // 
+            // GPU feature detection - not all GPUs support all features!
             occlusion_culling_introspection_supported: render_device
                 .features()
                 .contains(WgpuFeatures::MULTI_DRAW_INDIRECT_COUNT),
@@ -165,18 +225,21 @@ struct AppStatus {
     /// Whether occlusion culling is presently enabled.
     ///
     /// By default, this is set to true.
+    /// Toggle with SPACE to see the performance difference!
     occlusion_culling: bool,
 }
 
 impl Default for AppStatus {
     fn default() -> Self {
         AppStatus {
-            occlusion_culling: true,
+            occlusion_culling: true, // Start with culling enabled
         }
     }
 }
 
 fn main() {
+    // Enable special debug flag that allows us to read GPU buffers
+    // Normally GPU buffers are write-only for performance
     let render_debug_flags = RenderDebugFlags::ALLOW_COPIES_FROM_INDIRECT_PARAMETERS;
 
     App::new()
@@ -189,6 +252,7 @@ fn main() {
                     }),
                     ..default()
                 })
+                // Pass debug flags to render systems
                 .set(RenderPlugin {
                     debug_flags: render_debug_flags,
                     ..default()
@@ -198,9 +262,11 @@ fn main() {
                     ..default()
                 }),
         )
+        // Our custom plugin for reading GPU data
         .add_plugins(ReadbackIndirectParametersPlugin)
         .init_resource::<AppStatus>()
         .add_systems(Startup, setup)
+        // Update systems for animation and interaction
         .add_systems(Update, spin_small_cubes)
         .add_systems(Update, spin_large_cube)
         .add_systems(Update, update_status_text)
@@ -211,16 +277,19 @@ fn main() {
 impl Plugin for ReadbackIndirectParametersPlugin {
     fn build(&self, app: &mut App) {
         // Fetch the render app.
+        // Bevy has separate apps for main logic and rendering
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
 
         render_app
             .init_resource::<IndirectParametersStagingBuffers>()
+            // ExtractSchedule runs when copying data from main world to render world
             .add_systems(ExtractSchedule, readback_indirect_parameters)
             .add_systems(
                 Render,
                 create_indirect_parameters_staging_buffers
+                    // Run after resources are prepared but before rendering
                     .in_set(RenderSystems::PrepareResourcesFlush),
             )
             // Add the node that allows us to read the indirect parameters back
@@ -236,6 +305,9 @@ impl Plugin for ReadbackIndirectParametersPlugin {
             // because we want to make the indirect parameters run before
             // *something* in the graph, and `EndMainPassPostProcessing` is a
             // good a node as any other.
+            // 
+            // Render graph edges define execution order:
+            // EndMainPass -> ReadbackIndirectParameters -> EndMainPassPostProcessing
             .add_render_graph_edges(
                 Core3d,
                 (
@@ -253,6 +325,10 @@ impl Plugin for ReadbackIndirectParametersPlugin {
         // atomically reference counted. We store one reference to the
         // `SavedIndirectParameters` in the main app and another reference in
         // the render app.
+        // 
+        // This is a clever way to share data between the two "worlds":
+        // 1. Main world (game logic, input, etc.)
+        // 2. Render world (GPU commands, rendering)
         let saved_indirect_parameters = SavedIndirectParameters::from_world(app.world_mut());
         app.insert_resource(saved_indirect_parameters.clone());
 
@@ -263,6 +339,7 @@ impl Plugin for ReadbackIndirectParametersPlugin {
 
         render_app
             // Insert another reference to the `SavedIndirectParameters`.
+            // Both worlds now share the same Arc<Mutex<Data>>
             .insert_resource(saved_indirect_parameters);
     }
 }
@@ -274,6 +351,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    // Create the scene elements
     spawn_small_cubes(&mut commands, &mut meshes, &mut materials);
     spawn_large_cube(&mut commands, &asset_server, &mut meshes, &mut materials);
     spawn_light(&mut commands);
@@ -301,7 +379,7 @@ fn spawn_small_cubes(
     });
 
     // Create the entity that the small cubes will be parented to. This is the
-    // entity that we rotate.
+    // entity that we rotate to make all cubes orbit together
     let sphere_parent = commands
         .spawn(Transform::from_translation(Vec3::ZERO))
         .insert(Visibility::default())
@@ -313,11 +391,17 @@ fn spawn_small_cubes(
     // sphere mesh to find the positions of its vertices, and spawn a small cube
     // at each one. That way, we end up with a bunch of cubes arranged in a
     // spherical shape.
+    //
+    // This is a clever trick:
+    // 1. Create sphere mesh (invisible)
+    // 2. Use its vertex positions
+    // 3. Place cubes at those positions
+    // Result: Cubes arranged in a sphere!
 
     // Create the sphere mesh, and extract the positions of its vertices.
     let sphere = Sphere::new(OUTER_RADIUS)
         .mesh()
-        .ico(OUTER_SUBDIVISION_COUNT)
+        .ico(OUTER_SUBDIVISION_COUNT) // Icosphere subdivision level
         .unwrap();
     let sphere_positions = sphere.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
 
@@ -329,6 +413,7 @@ fn spawn_small_cubes(
             .insert(MeshMaterial3d(small_cube_material.clone()))
             .insert(Transform::from_translation(sphere_position))
             .id();
+        // Parent the cube to the sphere parent for group rotation
         commands.entity(sphere_parent).add_child(small_cube);
     }
 }
@@ -336,6 +421,7 @@ fn spawn_small_cubes(
 /// Spawns the large cube at the center of the screen.
 ///
 /// This cube rotates chaotically and occludes small cubes behind it.
+/// This is the key actor in our occlusion culling demo!
 fn spawn_large_cube(
     commands: &mut Commands,
     asset_server: &AssetServer,
@@ -350,19 +436,21 @@ fn spawn_large_cube(
         ))))
         .insert(MeshMaterial3d(materials.add(StandardMaterial {
             base_color: WHITE.into(),
+            // Bevy logo texture for visual interest
             base_color_texture: Some(asset_server.load("branding/icon.png")),
             ..default()
         })))
-        .insert(Transform::IDENTITY)
+        .insert(Transform::IDENTITY) // Start at origin
         .insert(LargeCube);
 }
 
-// Spins the outer sphere a bit every frame.
-//
-// This ensures that the set of cubes that are hidden and shown varies over
-// time.
+/// Spins the outer sphere a bit every frame.
+///
+/// This ensures that the set of cubes that are hidden and shown varies over
+/// time, demonstrating dynamic occlusion culling
 fn spin_small_cubes(mut sphere_parents: Query<&mut Transform, With<SphereParent>>) {
     for mut sphere_parent_transform in &mut sphere_parents {
+        // Rotate around Y axis (up)
         sphere_parent_transform.rotate_y(ROTATION_SPEED);
     }
 }
@@ -373,11 +461,13 @@ fn spin_small_cubes(mut sphere_parents: Query<&mut Transform, With<SphereParent>
 /// demonstrate the dynamicity of the occlusion culling.
 fn spin_large_cube(mut large_cubes: Query<&mut Transform, With<LargeCube>>) {
     for mut transform in &mut large_cubes {
+        // Rotate on all three axes at different speeds
+        // This creates chaotic tumbling motion
         transform.rotate(Quat::from_euler(
             EulerRot::XYZ,
-            0.13 * ROTATION_SPEED,
-            0.29 * ROTATION_SPEED,
-            0.35 * ROTATION_SPEED,
+            0.13 * ROTATION_SPEED, // X axis (pitch)
+            0.29 * ROTATION_SPEED, // Y axis (yaw) 
+            0.35 * ROTATION_SPEED, // Z axis (roll)
         ));
     }
 }
@@ -386,11 +476,12 @@ fn spin_large_cube(mut large_cubes: Query<&mut Transform, With<LargeCube>>) {
 fn spawn_light(commands: &mut Commands) {
     commands
         .spawn(DirectionalLight::default())
+        // Angle the light for better shading
         .insert(Transform::from_rotation(Quat::from_euler(
             EulerRot::ZYX,
             0.0,
-            PI * -0.15,
-            PI * -0.15,
+            PI * -0.15, // Slight downward angle
+            PI * -0.15, // Slight rightward angle
         )));
 }
 
@@ -398,15 +489,18 @@ fn spawn_light(commands: &mut Commands) {
 fn spawn_camera(commands: &mut Commands) {
     commands
         .spawn(Camera3d::default())
+        // Position camera back from origin to see the whole scene
         .insert(Transform::from_xyz(0.0, 0.0, 9.0).looking_at(Vec3::ZERO, Vec3::Y))
+        // DepthPrepass renders depth first for occlusion testing
         .insert(DepthPrepass)
+        // OcclusionCulling enables GPU-driven culling
         .insert(OcclusionCulling);
 }
 
 /// Spawns the help text at the upper left of the screen.
 fn spawn_help_text(commands: &mut Commands) {
     commands.spawn((
-        Text::new(""),
+        Text::new(""), // Text will be updated by update_status_text
         Node {
             position_type: PositionType::Absolute,
             top: Val::Px(12.0),
@@ -426,6 +520,8 @@ impl render_graph::Node for ReadbackIndirectParametersNode {
         // Extract the buffers that hold the GPU indirect draw parameters from
         // the world resources. We're going to read those buffers to determine
         // how many meshes were actually drawn.
+        // 
+        // This node runs as part of the render graph after culling happens
         let (Some(indirect_parameters_buffers), Some(indirect_parameters_mapping_buffers)) = (
             world.get_resource::<IndirectParametersBuffers>(),
             world.get_resource::<IndirectParametersStagingBuffers>(),
@@ -435,6 +531,11 @@ impl render_graph::Node for ReadbackIndirectParametersNode {
 
         // Get the indirect parameters buffers corresponding to the opaque 3D
         // phase, since all our meshes are in that phase.
+        // 
+        // Bevy has different render phases:
+        // - Opaque3d: Solid objects (our cubes)
+        // - AlphaMask3d: Objects with cutout transparency
+        // - Transparent3d: Objects with blending
         let Some(phase_indirect_parameters_buffers) =
             indirect_parameters_buffers.get(&TypeId::of::<Opaque3d>())
         else {
@@ -463,12 +564,13 @@ impl render_graph::Node for ReadbackIndirectParametersNode {
         };
 
         // Copy from the indirect parameters buffers to the staging buffers.
+        // This is a GPU-to-GPU copy, which is fast
         render_context.command_encoder().copy_buffer_to_buffer(
             indexed_data_buffer,
-            0,
+            0, // Source offset
             indirect_parameters_staging_data_buffer,
-            0,
-            indexed_data_buffer.size(),
+            0, // Destination offset
+            indexed_data_buffer.size(), // Copy entire buffer
         );
         render_context.command_encoder().copy_buffer_to_buffer(
             indexed_batch_sets_buffer,
@@ -491,6 +593,11 @@ impl render_graph::Node for ReadbackIndirectParametersNode {
 /// We need these staging buffers because `wgpu` doesn't allow us to read the
 /// contents of the indirect parameters buffers directly. We must first copy
 /// them from the GPU to a staging buffer, and then read the staging buffer.
+///
+/// Buffer types explained:
+/// - GPU buffers: Fast for GPU, can't be read by CPU
+/// - Staging buffers: Can be read by CPU, but slower for GPU
+/// - We copy GPU -> Staging -> CPU
 fn create_indirect_parameters_staging_buffers(
     mut indirect_parameters_staging_buffers: ResMut<IndirectParametersStagingBuffers>,
     indirect_parameters_buffers: Res<IndirectParametersBuffers>,
@@ -518,6 +625,8 @@ fn create_indirect_parameters_staging_buffers(
         Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("indexed data staging buffer"),
             size: indexed_data_buffer.size(),
+            // MAP_READ: CPU can read this buffer
+            // COPY_DST: GPU can copy TO this buffer
             usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }));
@@ -549,8 +658,10 @@ fn update_status_text(
         occlusion_culling_supported,
         occlusion_culling_introspection_supported,
     ): (u32, bool, bool) = {
+        // Lock the mutex to safely read shared data
         let saved_indirect_parameters = saved_indirect_parameters.lock().unwrap();
         (
+            // Count how many instances were actually rendered
             saved_indirect_parameters
                 .data
                 .iter()
@@ -595,12 +706,15 @@ fn update_status_text(
 
 /// A system that reads the indirect parameters back from the GPU so that we can
 /// report how many meshes were culled.
+/// 
+/// This runs in the ExtractSchedule when data moves from render world to main world
 fn readback_indirect_parameters(
     mut indirect_parameters_staging_buffers: ResMut<IndirectParametersStagingBuffers>,
     saved_indirect_parameters: Res<SavedIndirectParameters>,
     gpu_preprocessing_support: Res<GpuPreprocessingSupport>,
 ) {
     // If culling isn't supported on this platform, note that, and bail.
+    // Not all GPUs support the required features!
     if gpu_preprocessing_support.max_supported_mode != GpuPreprocessingMode::Culling {
         saved_indirect_parameters
             .lock()
@@ -618,31 +732,40 @@ fn readback_indirect_parameters(
     };
 
     // Read the GPU buffers back.
+    // We clone the Arc so each closure has its own reference
     let saved_indirect_parameters_0 = (**saved_indirect_parameters).clone();
     let saved_indirect_parameters_1 = (**saved_indirect_parameters).clone();
+    
+    // Read the draw commands (which meshes to render)
     readback_buffer::<IndirectParametersIndexed>(data_buffer, move |indirect_parameters| {
         saved_indirect_parameters_0.lock().unwrap().data = indirect_parameters.to_vec();
     });
+    
+    // Read the count (how many meshes to render)
     readback_buffer::<u32>(batch_sets_buffer, move |indirect_parameters_count| {
         saved_indirect_parameters_1.lock().unwrap().count = indirect_parameters_count[0];
     });
 }
 
-// A helper function to asynchronously read an array of [`Pod`] values back from
-// the GPU to the CPU.
-//
-// The given callback is invoked when the data is ready. The buffer will
-// automatically be unmapped after the callback executes.
+/// A helper function to asynchronously read an array of [`Pod`] values back from
+/// the GPU to the CPU.
+///
+/// The given callback is invoked when the data is ready. The buffer will
+/// automatically be unmapped after the callback executes.
+/// 
+/// This is asynchronous because GPU operations don't block the CPU
 fn readback_buffer<T>(buffer: Buffer, callback: impl FnOnce(&[T]) + Send + 'static)
 where
-    T: Pod,
+    T: Pod, // "Plain Old Data" - types that can be safely copied as bytes
 {
     // We need to make another reference to the buffer so that we can move the
     // original reference into the closure below.
     let original_buffer = buffer.clone();
     original_buffer
-        .slice(..)
+        .slice(..) // Take the whole buffer
         .map_async(MapMode::Read, move |result| {
+            // This callback runs when the GPU is done and data is ready
+            
             // Make sure we succeeded.
             if result.is_err() {
                 return;
@@ -651,16 +774,18 @@ where
             {
                 // Cast the raw bytes in the GPU buffer to the appropriate type.
                 let buffer_view = buffer.slice(..).get_mapped_range();
+                // Ensure we only read complete T values (no partial reads)
                 let indirect_parameters: &[T] = bytemuck::cast_slice(
                     &buffer_view[0..(buffer_view.len() / size_of::<T>() * size_of::<T>())],
                 );
 
-                // Invoke the callback.
+                // Invoke the callback with the typed data
                 callback(indirect_parameters);
             }
 
             // Unmap the buffer. We have to do this before submitting any more
             // GPU command buffers, or `wgpu` will assert.
+            // This releases the CPU's access to the buffer
             buffer.unmap();
         });
 }
@@ -687,8 +812,8 @@ fn toggle_occlusion_culling_on_request(
         if app_status.occlusion_culling {
             commands
                 .entity(camera)
-                .insert(DepthPrepass)
-                .insert(OcclusionCulling);
+                .insert(DepthPrepass)     // Required for occlusion testing
+                .insert(OcclusionCulling); // Enables GPU culling
         } else {
             commands
                 .entity(camera)
